@@ -1,4 +1,4 @@
-print("lib v2.0.3b")
+print("v3.0.0b")
 local cloneref = (cloneref or clonereference or function(instance: any)
     return instance
 end)
@@ -29,6 +29,14 @@ local Buttons = {}
 local Toggles = {}
 local Options = {}
 local Tooltips = {}
+
+local function AssertIndexAvailable(Map, Index, Kind)
+    if Index == nil then
+        return
+    end
+
+    assert(Map[Index] == nil, string.format("%s index %q is already in use.", Kind, tostring(Index)))
+end
 
 local BaseURL = "https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/"
 local CustomImageManager = {}
@@ -113,27 +121,36 @@ do
     end
 
     function CustomImageManager.GetAsset(AssetName: string)
-        if not CustomImageManagerAssets[AssetName] then
-            return nil
+        local AssetData = CustomImageManagerAssets[AssetName]
+        if not AssetData then
+            return nil, "unknown asset"
         end
 
-        local AssetData = CustomImageManagerAssets[AssetName]
         if AssetData.Id then
             return AssetData.Id
         end
 
-        local AssetID = string.format("rbxassetid://%s", AssetData.RobloxId)
-
-        if getcustomasset then
-            local Success, NewID = pcall(getcustomasset, AssetData.Path)
-
-            if Success and NewID then
-                AssetID = NewID
+        if not getcustomasset then
+            if AssetData.RobloxId and AssetData.RobloxId > 0 then
+                local AssetID = string.format("rbxassetid://%s", AssetData.RobloxId)
+                AssetData.Id = AssetID
+                return AssetID
             end
+            return nil, "getcustomasset is unavailable for this asset"
         end
 
-        AssetData.Id = AssetID
-        return AssetID
+        local Success, NewID = pcall(getcustomasset, AssetData.Path)
+        if not Success or typeof(NewID) ~= "string" or NewID == "" then
+            if AssetData.RobloxId and AssetData.RobloxId > 0 then
+                local AssetID = string.format("rbxassetid://%s", AssetData.RobloxId)
+                AssetData.Id = AssetID
+                return AssetID
+            end
+            return nil, tostring(NewID or "failed to resolve custom asset")
+        end
+
+        AssetData.Id = NewID
+        return NewID
     end
 
     function CustomImageManager.DownloadAsset(AssetName: string, ForceRedownload: boolean?)
@@ -142,6 +159,13 @@ do
         end
 
         local AssetData = CustomImageManagerAssets[AssetName]
+        if not AssetData then
+            return false, "unknown asset"
+        end
+
+        if ForceRedownload == true then
+            AssetData.Id = nil
+        end
 
         RecursiveCreatePath(AssetData.Path, true)
 
@@ -150,10 +174,74 @@ do
         end
 
         local success, errorMessage = pcall(function()
-            writefile(AssetData.Path, game:HttpGet(AssetData.URL))
+            local Body = game:HttpGet(AssetData.URL)
+            assert(typeof(Body) == "string" and #Body > 0, "Downloaded asset was empty")
+            writefile(AssetData.Path, Body)
         end)
 
+        if success then
+            AssetData.Id = nil
+        end
+
         return success, errorMessage
+    end
+
+    local function BuildRemoteAssetName(URL: string): string
+        local Host = URL:match("^https?://([^/%?#]+)") or "remote"
+        local PathPart = URL:match("^https?://[^/%?#]+/([^?#]*)") or "asset"
+        local Base = PathPart:match("([^/]+)$") or "asset"
+        Host = Host:gsub("[^%w%._%-]", "_")
+        Base = Base:gsub("[^%w%._%-]", "_")
+
+        local Hash = 2166136261
+        for Index = 1, #URL do
+            Hash = bit32.bxor(Hash, string.byte(URL, Index))
+            Hash = (Hash * 16777619) % 4294967296
+        end
+
+        local Name = string.format("remote_%s_%s_%08x", Host, Base, Hash)
+        if #Name > 180 then
+            Name = Name:sub(1, 180)
+        end
+        return Name
+    end
+
+    function CustomImageManager.ResolveURL(URL: string)
+        if typeof(URL) ~= "string" or not URL:match("^https?://") then
+            return nil, "invalid URL"
+        end
+        if not getcustomasset or not writefile or not isfile then
+            return nil, "custom asset functions are unavailable"
+        end
+
+        local AssetName = BuildRemoteAssetName(URL)
+        if not CustomImageManagerAssets[AssetName] then
+            CustomImageManagerAssets[AssetName] = {
+                RobloxId = 0,
+                Path = "Obsidian/custom_assets/" .. AssetName,
+                URL = URL,
+                Id = nil,
+            }
+        else
+            CustomImageManagerAssets[AssetName].URL = URL
+        end
+
+        local Ok, Err = CustomImageManager.DownloadAsset(AssetName, false)
+        if not Ok then
+            return nil, Err
+        end
+
+        local AssetId = CustomImageManager.GetAsset(AssetName)
+        if not AssetId then
+            return nil, "custom asset could not be resolved"
+        end
+
+        return {
+            Url = AssetId,
+            ImageRectOffset = Vector2.zero,
+            ImageRectSize = Vector2.zero,
+            Custom = true,
+        }
     end
 
     for AssetName, _ in CustomImageManagerAssets do
@@ -162,17 +250,17 @@ do
 end
 
 local AspectTheme = {
-    BackgroundColor = Color3.fromRGB(15, 15, 15),   -- #0F0F0F
-    MainColor = Color3.fromRGB(26, 25, 25),          -- #1A1919
-    SearchColor = Color3.fromRGB(22, 21, 21),       -- #161515
-    AccentColor = Color3.fromRGB(93, 93, 93),        -- #5D5D5D
-    OutlineColor = Color3.fromRGB(26, 25, 25),       -- #1A1919
-    FontColor = Color3.fromRGB(164, 164, 164),       -- #A4A4A4
+    BackgroundColor = Color3.fromRGB(8, 8, 8),
+    MainColor = Color3.fromRGB(15, 15, 15),
+    SearchColor = Color3.fromRGB(19, 19, 19),
+    AccentColor = Color3.fromRGB(214, 214, 214),
+    OutlineColor = Color3.fromRGB(34, 34, 34),
+    FontColor = Color3.fromRGB(158, 158, 158),
 
-    Font = Font.fromEnum(Enum.Font.SourceSansBold),
-    RedColor = Color3.fromRGB(238, 88, 88),
-    DestructiveColor = Color3.fromRGB(214, 74, 74),
-    DarkColor = Color3.fromRGB(3, 3, 3),
+    Font = Font.fromEnum(Enum.Font.GothamMedium),
+    RedColor = Color3.fromRGB(220, 220, 220),
+    DestructiveColor = Color3.fromRGB(188, 188, 188),
+    DarkColor = Color3.fromRGB(2, 2, 2),
     WhiteColor = Color3.fromRGB(245, 245, 245),
     BackgroundImage = "",
 }
@@ -299,6 +387,7 @@ local Library = {
     Registry = {},
     Scales = {},
     ScalesOffset = {},
+    CornerStyles = {},
 
     --// Mouse \\--
     OriginalMouseIconEnabled = UserInputService.MouseIconEnabled,
@@ -377,11 +466,11 @@ local Templates = {
     --// Library \\--
     Window = {
         Title = "aspect.sys",
-        Subtitle = "Roblox Script",
-        Footer = "aspect.sys",
+        Subtitle = "Obsidian",
+        Footer = "your true potential",
 
         Position = UDim2.fromOffset(6, 6),
-        Size = UDim2.fromOffset(985, 570),
+        Size = UDim2.fromOffset(1000, 640),
         IconSize = UDim2.fromOffset(18, 18),
 
         AutoShow = true,
@@ -395,16 +484,17 @@ local Templates = {
         SnapMargin = 8,
         SnapAvoidCoreGui = true,
 
-        SearchbarSize = UDim2.fromOffset(180, 0),
-        SearchbarHeight = 28,
-        SearchbarCornerRadius = 4,
+        SearchbarSize = UDim2.fromOffset(220, 0),
+        SearchbarHeight = 29,
+        SearchbarCornerRadius = 5,
         GlobalSearch = false,
+        DisableSearch = false,
 
-        CornerRadius = 3,
+        CornerRadius = 10,
         NotifySide = "Right",
         ShowCustomCursor = true,
 
-        Font = Enum.Font.SourceSansBold,
+        Font = Enum.Font.GothamMedium,
         ToggleKeybind = Enum.KeyCode.RightControl,
 
         ShowMobileButtons = true,
@@ -412,42 +502,42 @@ local Templates = {
 
         UnlockMouseWhileOpen = true,
 
-        EnableSidebarResize = false,
+        EnableSidebarResize = true,
         EnableCompacting = true,
         DisableCompactingSnap = false,
         SidebarCompacted = false,
         MinContainerWidth = 420,
 
         --// Snapping \\--
-        MinSidebarWidth = 128,
-        SidebarCompactWidth = 48,
+        MinSidebarWidth = 170,
+        SidebarCompactWidth = 56,
         SidebarCollapseThreshold = 0.5,
 
         --// Dragging \\--
-        CompactWidthActivation = 128,
+        CompactWidthActivation = 170,
 
         --// Background \\--
         BackgroundImage = "",
 
         --// Animations \\--
         Animations = {
-            ToggleWindow = false,
-            TabSwitch = false,
-            Groupbox = false,
-            Dropdown = false,
-            KeyPicker = false,
+            ToggleWindow = true,
+            TabSwitch = true,
+            Groupbox = true,
+            Dropdown = true,
+            KeyPicker = true,
         },
 
-        TabTransitionTime = 0.22,
-        TabSwipeOffset = 26,
-        TabSwipeFrom = "bottom",
+        TabTransitionTime = 0.20,
+        TabSwipeOffset = 18,
+        TabSwipeFrom = "right",
         TabButtonsStyle = {
-            Gap = 4,
-            Padding = 6,
+            Gap = 3,
+            Padding = 9,
             CornerRadius = 2,
             Indicator = true,
-            IndicatorWidth = 3,
-            IndicatorHeight = 2,
+            IndicatorWidth = 2,
+            IndicatorHeight = 18,
         },
     },
     Groupbox = {
@@ -548,6 +638,7 @@ local Templates = {
 
         Multi = false,
         DragSelect = false,
+        KeepDisabledValuePosition = false,
         MaxVisibleDropdownItems = 8,
 
         Callback = function() end,
@@ -682,22 +773,36 @@ end
 
 --// Basic Functions \\--
 local function WaitForEvent(Event, Timeout, Condition)
+    assert(Event, "Event is required.")
+    assert(typeof(Timeout) == "number" and Timeout >= 0, "Timeout must be a non-negative number.")
+
     local Bindable = Instance.new("BindableEvent")
-    local Connection = Event:Once(function(...)
-        if not Condition or typeof(Condition) == "function" and Condition(...) then
-            Bindable:Fire(true)
+    local Finished = false
+    local Connection
+
+    local function Finish(Result)
+        if Finished then return end
+        Finished = true
+        if Connection and Connection.Connected then Connection:Disconnect() end
+        if Bindable.Parent then Bindable:Fire(Result) end
+    end
+
+    Connection = Event:Once(function(...)
+        if not Condition or (typeof(Condition) == "function" and Condition(...)) then
+            Finish(true)
         else
-            Bindable:Fire(false)
+            Finish(false)
         end
     end)
+
     task.delay(Timeout, function()
-        Connection:Disconnect()
-        Bindable:Fire(false)
+        if not Finished then Finish(false) end
     end)
 
     local Result = Bindable.Event:Wait()
+    Finished = true
+    if Connection and Connection.Connected then Connection:Disconnect() end
     Bindable:Destroy()
-
     return Result
 end
 
@@ -730,6 +835,14 @@ local function IsMovementInput(Input: InputObject)
         and Library.IsRobloxFocused
 end
 
+local function GetCurrentPointerPosition(Input: InputObject): Vector2
+    if Input and Input.UserInputType == Enum.UserInputType.Touch then
+        return Input.Position
+    end
+
+    return UserInputService:GetMouseLocation()
+end
+
 local function GetTableSize(Table: { [any]: any })
     local Size = 0
 
@@ -759,7 +872,7 @@ local function StopTween(Tween: TweenBase, Destroy: boolean?)
     end
 
     if Destroy == true then
-        pcall(Tween.Destroy, Tween)
+        Tween:Destroy()
     end
 end
 
@@ -1026,6 +1139,45 @@ local function RestoreDepbox(Box)
 end
 
 --// Pop Out
+local function GetGuiDescendantsOfClass(Root: Instance, ClassName: string)
+    local Result = {}
+    for _, Descendant in Root:GetDescendants() do
+        if Descendant:IsA(ClassName) then
+            table.insert(Result, Descendant)
+        end
+    end
+    return Result
+end
+
+local function IsGuiObjectInstance(Object: any): boolean
+    return typeof(Object) == "Instance" and Object:IsA("GuiObject")
+end
+
+local function RegisterDraggable(Object: any)
+    assert(IsGuiObjectInstance(Object), "DraggableElements can only contain GuiObjects; received " .. tostring(Object))
+    if not table.find(Library.DraggableElements, Object) then
+        table.insert(Library.DraggableElements, Object)
+    end
+    return Object
+end
+
+local function GetSiblingIndexSafe(Object: Instance): number
+    if not IsGuiObjectInstance(Object) then
+        return 0
+    end
+
+    local Parent = Object.Parent
+    if not Parent then
+        return 0
+    end
+    for Index, Child in Parent:GetChildren() do
+        if Child == Object then
+            return Index
+        end
+    end
+    return 0
+end
+
 function SyncPopOutVisibility(Box: any)
     if not Box.PopOutFloat then
         return
@@ -1035,17 +1187,17 @@ function SyncPopOutVisibility(Box: any)
 end
 
 local function DimPopOutClone(Root: GuiObject)
-    for _, Descendant in Root:QueryDescendants("TextLabel, TextButton, TextBox") do
-        Descendant.TextTransparency = math.max(Descendant.TextTransparency, 0.45)
-    end
+    for _, Descendant in Root:GetDescendants() do
+        if Descendant:IsA("TextLabel") or Descendant:IsA("TextButton") or Descendant:IsA("TextBox") then
+            Descendant.TextTransparency = math.max(Descendant.TextTransparency, 0.45)
+        elseif Descendant:IsA("ImageLabel") or Descendant:IsA("ImageButton") then
+            Descendant.ImageTransparency = math.max(Descendant.ImageTransparency, 0.45)
+        end
 
-    for _, Descendant in Root:QueryDescendants("ImageLabel, ImageButton") do
-        Descendant.ImageTransparency = math.max(Descendant.ImageTransparency, 0.45)
-    end
-
-    for _, Descendant in Root:QueryDescendants("GuiButton") do
-        Descendant.Active = false
-        Descendant.AutoButtonColor = false
+        if Descendant:IsA("GuiButton") then
+            Descendant.Active = false
+            Descendant.AutoButtonColor = false
+        end
     end
 end
 
@@ -1063,8 +1215,16 @@ local function GetTopFloatAt(Point: Vector2): GuiObject?
     local BestOrder = -math.huge
     local Floats = Library.Floats
 
-    for _, Surface in Library.DraggableElements do
-        if not Surface or not Surface.Parent or not Surface.Visible then
+    for Index = #Library.DraggableElements, 1, -1 do
+        local Surface = Library.DraggableElements[Index]
+
+        if not IsGuiObjectInstance(Surface) then
+            warn("Obsidian: removing invalid draggable entry " .. tostring(Surface))
+            table.remove(Library.DraggableElements, Index)
+            continue
+        end
+
+        if not Surface.Parent or not Surface.Visible then
             continue
         end
         if Floats and Surface.Parent ~= Floats then
@@ -1074,7 +1234,7 @@ local function GetTopFloatAt(Point: Vector2): GuiObject?
             continue
         end
 
-        local SiblingIndex = tonumber(select(2, pcall(function() return Surface:GetSiblingIndex() end))) or 0
+        local SiblingIndex = GetSiblingIndexSafe(Surface)
         local Order = Surface.ZIndex * 100000 + SiblingIndex
         if Order >= BestOrder then
             BestOrder = Order
@@ -1347,6 +1507,7 @@ local function ResetTab(Tab)
 end
 
 function Library:UpdateSearch(SearchText)
+    SearchText = tostring(SearchText or "")
     Library.SearchText = SearchText
 
     local TabsToSearch = {}
@@ -1434,28 +1595,46 @@ end
 
 function Library:UpdateColorsUsingRegistry()
     for Instance, Properties in Library.Registry do
+        if not Instance or (Instance.Parent == nil and not Instance:IsDescendantOf(game)) then
+            Library.Registry[Instance] = nil
+            continue
+        end
+
         for Property, Index in Properties do
             local SchemeValue = GetSchemeValue(Index)
-
-            if SchemeValue or typeof(Index) == "function" then
-                Instance[Property] = SchemeValue or Index()
+            local Value = SchemeValue
+            if Value == nil and typeof(Index) == "function" then
+                Value = Index()
+            end
+            if Value ~= nil then
+                Instance[Property] = Value
             end
         end
     end
 end
 
 function Library:SetDPIScale(DPIScale: number)
+    assert(typeof(DPIScale) == "number" and DPIScale == DPIScale and DPIScale ~= math.huge and DPIScale ~= -math.huge, "DPIScale must be a finite number.")
+    DPIScale = math.clamp(DPIScale, 50, 300)
     Library.DPIScale = DPIScale / 100
     Library.MinSize = Library.OriginalMinSize * Library.DPIScale
 
-    for _, UIScale in Library.Scales do
-        UIScale.Scale = Library.DPIScale - (tonumber(Library.ScalesOffset[UIScale]) or 0)
+    for Index = #Library.Scales, 1, -1 do
+        local UIScale = Library.Scales[Index]
+        if not UIScale or not UIScale.Parent then
+            if UIScale then Library.ScalesOffset[UIScale] = nil end
+            table.remove(Library.Scales, Index)
+        else
+            UIScale.Scale = Library.DPIScale - (tonumber(Library.ScalesOffset[UIScale]) or 0)
+        end
     end
 
     for _, Option in Options do
         if Option.Type == "Dropdown" then
             Option:RecalculateListSize()
             Option:RefreshPool()
+        elseif Option.Type == "KeyPicker" then
+            Option:Update()
         end
     end
 
@@ -1463,7 +1642,7 @@ function Library:SetDPIScale(DPIScale: number)
         Notification:Resize()
     end
 
-    (Library :: any):UpdateNotificationPositions(true)
+    Library:UpdateNotificationPositions(true)
 end
 
 function Library:GiveSignal(Connection: RBXScriptConnection | RBXScriptSignal)
@@ -1501,15 +1680,11 @@ local Icons: IconModule | nil = nil
 
 function Library:GetIcon(IconName: string)
     if not FetchIcons or not Icons then
-        return
+        return nil
     end
 
-    local Success, Icon = pcall(Icons.GetAsset, IconName)
-    if not Success then
-        return
-    end
-
-    return Icon
+    assert(typeof(Icons.GetAsset) == "function", "Icon module is missing GetAsset(Name).")
+    return Icons.GetAsset(IconName)
 end
 
 function Library:GetCustomIcon(IconName: string): any
@@ -1534,6 +1709,16 @@ function Library:GetCustomIcon(IconName: string): any
             ImageRectSize = Vector2.zero,
             Custom = true,
         }
+    elseif IconName:match("^https?://") then
+        local RemoteIcon, RemoteError = CustomImageManager.ResolveURL(IconName)
+        if RemoteIcon then
+            return RemoteIcon
+        end
+        local LucideIcon = Library:GetIcon(IconName)
+        if LucideIcon then
+            return LucideIcon
+        end
+        return nil, RemoteError
     end
 
     local LucideIcon = Library:GetIcon(IconName)
@@ -1559,23 +1744,27 @@ function Library:ApplyLucideIcon(ImageGui: any, Icon: any, Rotation: number?)
     ImageGui.Rotation = Rotation or ImageGui.Rotation
 end
 
+local function CloneDefault(Value)
+    if typeof(Value) ~= "table" then return Value end
+    local Result = {}
+    for Key, Child in Value do Result[Key] = CloneDefault(Child) end
+    return Result
+end
+
 function Library:Validate(Table: { [string]: any }, Template: { [string]: any }): { [string]: any }
-    if typeof(Table) ~= "table" then
-        return Template
+    if typeof(Template) ~= "table" then
+        return typeof(Table) == "table" and Table or {}
     end
+    if typeof(Table) ~= "table" then Table = {} end
 
-    for k, v in Template do
-        if typeof(k) == "number" then
-            continue
-        end
-
-        if typeof(v) == "table" then
-            Table[k] = Library:Validate(Table[k], v)
-        elseif Table[k] == nil then
-            Table[k] = v
+    for Key, DefaultValue in Template do
+        if typeof(Key) == "number" then continue end
+        if Table[Key] == nil then
+            Table[Key] = CloneDefault(DefaultValue)
+        elseif typeof(DefaultValue) == "table" and typeof(Table[Key]) == "table" then
+            Table[Key] = Library:Validate(Table[Key], DefaultValue)
         end
     end
-
     return Table
 end
 
@@ -1612,38 +1801,29 @@ local function New(ClassName: string, Properties: { [string]: any }): any
     FillInstance(Properties, Instance)
 
     if Instance:IsA("TextLabel") or Instance:IsA("TextButton") or Instance:IsA("TextBox") then
-        Instance.FontFace = Font.fromEnum(Enum.Font.SourceSansBold)
+        Instance.FontFace = Library.Scheme.Font
     end
 
-    if Properties["Parent"] and not Properties["ZIndex"] then
-        pcall(function()
-            Instance.ZIndex = Properties.Parent.ZIndex
-        end)
-    end
+    --[[if Properties["Parent"] and not Properties["ZIndex"] and typeof(Properties.Parent) == "Instance" and Properties.Parent:IsA("GuiObject") then
+        Instance.ZIndex = Properties.Parent.ZIndex
+    end]]
 
     return Instance
 end
 
 --// Main Instances \\-
 local function SafeParentUI(Instance: Instance, Parent: Instance | () -> Instance)
-    local success, _error = pcall(function()
-        if not Parent then
-            Parent = CoreGui
-        end
-
-        local DestinationParent
-        if typeof(Parent) == "function" then
-            DestinationParent = Parent()
-        else
-            DestinationParent = Parent
-        end
-
-        Instance.Parent = DestinationParent
-    end)
-
-    if not (success and Instance.Parent) then
-        Instance.Parent = Library.LocalPlayer:WaitForChild("PlayerGui", math.huge)
+    local DestinationParent
+    if Parent == nil then
+        DestinationParent = CoreGui
+    elseif typeof(Parent) == "function" then
+        DestinationParent = Parent()
+    else
+        DestinationParent = Parent
     end
+
+    assert(typeof(DestinationParent) == "Instance", "UI parent resolver must return an Instance.")
+    Instance.Parent = DestinationParent
 end
 
 local function ParentUI(UI: Instance, SkipHiddenUI: boolean?)
@@ -1652,7 +1832,9 @@ local function ParentUI(UI: Instance, SkipHiddenUI: boolean?)
         return
     end
 
-    pcall(protectgui, UI)
+    if typeof(protectgui) == "function" then
+        protectgui(UI)
+    end
     SafeParentUI(UI, gethui)
 end
 
@@ -1790,11 +1972,7 @@ do
 end
 
 local function RestoreMouseIcon()
-    pcall(function() 
-        RunService:UnbindFromRenderStep(Library.ShowCursorBinding)
-        RunService.RenderStepped:Wait()
-    end)
-
+    RunService:UnbindFromRenderStep(Library.ShowCursorBinding)
     UserInputService.MouseIconEnabled = Library.OriginalMouseIconEnabled
     if Cursor then Cursor.Visible = false end
 end
@@ -1841,6 +2019,8 @@ local OnlineFetchIcons, OnlineIcons = pcall(function()
 end)
 if OnlineFetchIcons and OnlineIcons then
     Library:SetIconModule(OnlineIcons)
+else
+    warn("Obsidian: failed to load the optional online Lucide icon module; icon names may not render.")
 end
 
 --// Lib Functions \\--
@@ -1962,6 +2142,9 @@ function Library:GetKeyString(KeyCode: Enum.KeyCode)
 end
 
 function Library:GetTextBounds(Text: string, FontFace: Font, Size: number, Width: number?): (number, number)
+    assert(typeof(FontFace) == "Font", "FontFace must be a Font value.")
+    assert(typeof(Size) == "number" and Size > 0, "Size must be greater than 0.")
+
     local Params = Instance.new("GetTextBoundsParams")
     Params.Text = tostring(Text or "")
     Params.RichText = true
@@ -1972,12 +2155,8 @@ function Library:GetTextBounds(Text: string, FontFace: Font, Size: number, Width
     local ViewportWidth = Camera and Camera.ViewportSize.X or 1920
     Params.Width = Width or math.max(1, ViewportWidth - 32)
 
-    local Success, Bounds = pcall(TextService.GetTextBoundsAsync, TextService, Params)
-    if Success and Bounds then
-        return Bounds.X, Bounds.Y
-    end
-
-    return math.max(1, #Params.Text * math.max(6, Size * 0.5)), math.max(Size + 2, 18)
+    local Bounds = TextService:GetTextBoundsAsync(Params)
+    return Bounds.X, Bounds.Y
 end
 
 function Library:MouseIsOverFrame(Frame: GuiObject, Mouse: Vector2): boolean
@@ -2002,33 +2181,44 @@ function Library:IsInsideFrame(ParentFrame: GuiObject, Frame: GuiObject)
 end
 
 function Library:SafeCallback(Func: (...any) -> ...any, ...: any)
-    if typeof(Func) ~= "function" then
-        return nil
-    end
+    if typeof(Func) ~= "function" then return nil end
 
-    local Traceback
-    local Result = table.pack(xpcall(Func, function(Error)
-        Traceback = debug.traceback(tostring(Error), 2)
-
-        if Library.NotifyOnError and typeof(Library.Notify) == "function" then
-            pcall(Library.Notify, Library, tostring(Error))
-        end
-
-        return Error
+    local Packed = table.pack(xpcall(Func, function(Error)
+        return debug.traceback(tostring(Error), 2)
     end, ...))
 
-    if not Result[1] then
-        return nil
+    if Packed[1] then
+        return table.unpack(Packed, 2, Packed.n)
     end
 
-    return table.unpack(Result, 2, Result.n)
+    local ErrorMessage = tostring(Packed[2])
+    warn("Obsidian callback error:\n" .. ErrorMessage)
+    if Library.NotifyOnError and typeof(Library.Notify) == "function" and not Library.Unloaded then
+        Library.Notify(Library, {
+            Title = "Callback error",
+            Description = ErrorMessage,
+            Time = 5,
+            Closable = true,
+        })
+    end
+
+    -- Callback failures are reported without tearing down the UI runtime.
+    return nil, ErrorMessage
 end
 
 function GetOverlappingDraggable(UI: GuiObject, TargetPos: Vector2?)
     local Pos1 = TargetPos or UI.AbsolutePosition
     local Size1 = UI.AbsoluteSize
 
-    for _, Other in ipairs(Library.DraggableElements) do
+    for Index = #Library.DraggableElements, 1, -1 do
+        local Other = Library.DraggableElements[Index]
+
+        if not IsGuiObjectInstance(Other) then
+            warn("Obsidian: removing invalid draggable entry " .. tostring(Other))
+            table.remove(Library.DraggableElements, Index)
+            continue
+        end
+
         if Other == UI or not Other.Visible or not Other.Parent then
             continue
         end
@@ -2100,15 +2290,7 @@ end
 
 --// Window Snapping \\--
 local function GetCoreGuiInset(): (Vector2, Vector2)
-    local Success, TopLeft, BottomRight = pcall(function()
-        return GuiService:GetGuiInset()
-    end)
-
-    if Success and TopLeft and BottomRight then
-        return TopLeft, BottomRight
-    end
-
-    return Vector2.zero, Vector2.zero
+    return GuiService:GetGuiInset()
 end
 
 local function GetSnapEdges(ElemSize: Vector2, ViewportSize: Vector2, Margin: number, AvoidCoreGui: boolean)
@@ -2166,167 +2348,107 @@ function Library:MakeDraggable(
     IsMainWindow: boolean?,
     SnapConfig: { Enabled: boolean, Distance: number?, Margin: number?, AvoidCoreGui: boolean? }?
 )
+    assert(IsGuiObjectInstance(UI), "MakeDraggable UI must be a GuiObject")
+    assert(IsGuiObjectInstance(DragFrame), "MakeDraggable DragFrame must be a GuiObject")
+
     local StartPos
     local FramePos
     local Dragging = false
     local Changed
     local InputBegan
     local InputChanged
-
     local SnapGuideX, SnapGuideY
 
     local function GetSnapGuides()
         if not SnapGuideX then
-            SnapGuideX = New("Frame", {
-                BackgroundColor3 = "AccentColor",
-                BackgroundTransparency = 0.25,
-                BorderSizePixel = 0,
-                AnchorPoint = Vector2.new(0.5, 0),
-                Size = UDim2.new(0, 2, 1, 0),
-                Visible = false,
-                ZIndex = 10000,
-                Parent = ScreenGui,
-            })
+            SnapGuideX = New("Frame", { BackgroundColor3="AccentColor", BackgroundTransparency=0.25, BorderSizePixel=0, AnchorPoint=Vector2.new(0.5,0), Size=UDim2.new(0,2,1,0), Visible=false, ZIndex=10000, Parent=ScreenGui })
         end
-
         if not SnapGuideY then
-            SnapGuideY = New("Frame", {
-                BackgroundColor3 = "AccentColor",
-                BackgroundTransparency = 0.25,
-                BorderSizePixel = 0,
-                AnchorPoint = Vector2.new(0, 0.5),
-                Size = UDim2.new(1, 0, 0, 2),
-                Visible = false,
-                ZIndex = 10000,
-                Parent = ScreenGui,
-            })
+            SnapGuideY = New("Frame", { BackgroundColor3="AccentColor", BackgroundTransparency=0.25, BorderSizePixel=0, AnchorPoint=Vector2.new(0,0.5), Size=UDim2.new(1,0,0,2), Visible=false, ZIndex=10000, Parent=ScreenGui })
         end
-
         return SnapGuideX, SnapGuideY
     end
 
     local function HideSnapGuides()
-        if SnapGuideX then
-            SnapGuideX.Visible = false
-        end
-        if SnapGuideY then
-            SnapGuideY.Visible = false
-        end
+        if SnapGuideX then SnapGuideX.Visible=false end
+        if SnapGuideY then SnapGuideY.Visible=false end
     end
 
-    InputBegan = DragFrame.InputBegan:Connect(function(Input: InputObject)
-        if not IsClickInput(Input) or IsMainWindow and Library.CantDragForced then
-            return
+    local function StopDrag()
+        Dragging=false
+        HideSnapGuides()
+        if Changed and Changed.Connected then Changed:Disconnect() end
+        Changed=nil
+        if InputChanged and InputChanged.Connected then InputChanged:Disconnect() end
+        InputChanged=nil
+        StartPos=nil
+        FramePos=nil
+    end
+
+    local function UpdateDrag(ChangeInput)
+        if not Dragging or not StartPos or not FramePos then return end
+        if not (ScreenGui and ScreenGui.Parent) or not UI.Parent then
+            StopDrag(); return
         end
 
-        StartPos = Input.Position
-        FramePos = UI.Position
-        Dragging = true
+        local Delta = ChangeInput.Position - StartPos
+        local NewX = FramePos.X.Offset + Delta.X
+        local NewY = FramePos.Y.Offset + Delta.Y
 
-        Changed = Input.Changed:Connect(function()
-            if Input.UserInputState ~= Enum.UserInputState.End then
-                return
-            end
+        if SnapConfig and SnapConfig.Enabled then
+            local Camera = workspace.CurrentCamera
+            local ViewportSize = Camera and Camera.ViewportSize or Vector2.new(1920,1080)
+            local Distance = math.max(0, tonumber(SnapConfig.Distance) or 28)
+            local Margin = math.max(0, tonumber(SnapConfig.Margin) or 8)
+            local AbsX = FramePos.X.Scale * ViewportSize.X + NewX
+            local AbsY = FramePos.Y.Scale * ViewportSize.Y + NewY
+            local ElemSize = UI.AbsoluteSize
+            local TargetsX, TargetsY = GetSnapEdges(ElemSize, ViewportSize, Margin, SnapConfig.AvoidCoreGui ~= false)
+            local SnappedX, SnappedXName = GetClosestSnapTarget(AbsX, TargetsX, Distance)
+            local SnappedY, SnappedYName = GetClosestSnapTarget(AbsY, TargetsY, Distance)
+            if SnappedX then NewX = SnappedX - FramePos.X.Scale * ViewportSize.X end
+            if SnappedY then NewY = SnappedY - FramePos.Y.Scale * ViewportSize.Y end
 
-            Dragging = false
-            HideSnapGuides()
+            local GuideX, GuideY = GetSnapGuides()
+            GuideX.Visible = SnappedX ~= nil
+            if SnappedX then GuideX.Position = UDim2.fromOffset(GetSnapGuideOffset(SnappedXName, SnappedX, ElemSize.X),0) end
+            GuideY.Visible = SnappedY ~= nil
+            if SnappedY then GuideY.Position = UDim2.fromOffset(0,GetSnapGuideOffset(SnappedYName, SnappedY, ElemSize.Y)) end
+        end
 
-            if Changed and Changed.Connected then
-                Changed:Disconnect()
-                Changed = nil
-            end
+        UI.Position = UDim2.new(FramePos.X.Scale, NewX, FramePos.Y.Scale, NewY)
+    end
+
+    local function BeginDrag(Input)
+        if Dragging or not IsClickInput(Input) then return end
+        if IsMainWindow and Library.CantDragForced then return end
+        if not IgnoreToggled and not Library.Toggled then return end
+        if not (ScreenGui and ScreenGui.Parent) then return end
+
+        StartPos=Input.Position
+        FramePos=UI.Position
+        Dragging=true
+
+        Changed=Input.Changed:Connect(function()
+            if Input.UserInputState==Enum.UserInputState.End then StopDrag() end
         end)
-    end)
+        InputChanged=UserInputService.InputChanged:Connect(function(ChangeInput)
+            if IsHoverInput(ChangeInput) then UpdateDrag(ChangeInput) end
+        end)
+    end
 
-    InputChanged = UserInputService.InputChanged:Connect(function(Input: InputObject)
-        if
-            (not IgnoreToggled and not Library.Toggled)
-            or (IsMainWindow and Library.CantDragForced)
-            or not (ScreenGui and ScreenGui.Parent)
-        then
-            Dragging = false
-            HideSnapGuides()
-
-            if Changed and Changed.Connected then
-                Changed:Disconnect()
-                Changed = nil
-            end
-
-            return
-        end
-
-        if Dragging and IsHoverInput(Input) then
-            local Delta = Input.Position - StartPos
-            local NewX = FramePos.X.Offset + Delta.X
-            local NewY = FramePos.Y.Offset + Delta.Y
-
-            if SnapConfig and SnapConfig.Enabled then
-                local ViewportSize = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
-                local Distance = SnapConfig.Distance or 28
-                local Margin = SnapConfig.Margin or 8
-
-                local AbsX = FramePos.X.Scale * ViewportSize.X + NewX
-                local AbsY = FramePos.Y.Scale * ViewportSize.Y + NewY
-
-                local ElemSize = UI.AbsoluteSize
-                local TargetsX, TargetsY = GetSnapEdges(ElemSize, ViewportSize, Margin, SnapConfig.AvoidCoreGui ~= false)
-                local SnappedX, SnappedXName = GetClosestSnapTarget(AbsX, TargetsX, Distance)
-                local SnappedY, SnappedYName = GetClosestSnapTarget(AbsY, TargetsY, Distance)
-
-                if SnappedX then
-                    NewX = SnappedX - FramePos.X.Scale * ViewportSize.X
-                end
-                if SnappedY then
-                    NewY = SnappedY - FramePos.Y.Scale * ViewportSize.Y
-                end
-
-                local GuideX, GuideY = GetSnapGuides()
-                GuideX.Visible = SnappedX ~= nil
-                if SnappedX then
-                    GuideX.Position = UDim2.fromOffset(GetSnapGuideOffset(SnappedXName, SnappedX, ElemSize.X), 0)
-                end
-
-                GuideY.Visible = SnappedY ~= nil
-                if SnappedY then
-                    GuideY.Position = UDim2.fromOffset(0, GetSnapGuideOffset(SnappedYName, SnappedY, ElemSize.Y))
-                end
-            end
-
-            UI.Position = UDim2.new(FramePos.X.Scale, NewX, FramePos.Y.Scale, NewY)
-        end
-    end)
-
-    Library:GiveSignal(InputChanged)
-    Library:GiveSignal(InputBegan)
-
+    InputBegan=DragFrame.InputBegan:Connect(BeginDrag)
     UI.Destroying:Once(function()
-        if InputChanged and InputChanged.Connected then
-            InputChanged:Disconnect()
-        end
+        StopDrag()
+        if InputBegan and InputBegan.Connected then InputBegan:Disconnect() end
+        if SnapGuideX then SnapGuideX:Destroy() end
+        if SnapGuideY then SnapGuideY:Destroy() end
 
-        if InputBegan and InputBegan.Connected then
-            InputBegan:Disconnect()
-        end
-
-        if Changed and Changed.Connected then
-            Changed:Disconnect()
-        end
-
-        if SnapGuideX then
-            SnapGuideX:Destroy()
-        end
-        if SnapGuideY then
-            SnapGuideY:Destroy()
-        end
-
-        local IdxChanged = table.find(Library.Signals, InputChanged)
-        if IdxChanged then
-            table.remove(Library.Signals, IdxChanged)
-        end
-
-        local IdxBegan = table.find(Library.Signals, InputBegan)
-        if IdxBegan then
-            table.remove(Library.Signals, IdxBegan)
+        for Index = #Library.DraggableElements, 1, -1 do
+            if Library.DraggableElements[Index] == UI then
+                table.remove(Library.DraggableElements, Index)
+                break
+            end
         end
     end)
 end
@@ -2334,83 +2456,42 @@ end
 function Library:MakeResizable(UI: GuiObject, DragFrame: GuiObject, Callback: () -> ()?)
     local StartPos
     local FrameSize
-    local Dragging = false
+    local Dragging=false
     local Changed
     local InputBegan
     local InputChanged
 
-    InputBegan = DragFrame.InputBegan:Connect(function(Input: InputObject)
-        if not IsClickInput(Input) then
-            return
-        end
+    local function StopResize()
+        Dragging=false
+        if Changed and Changed.Connected then Changed:Disconnect() end
+        Changed=nil
+        if InputChanged and InputChanged.Connected then InputChanged:Disconnect() end
+        InputChanged=nil
+        StartPos=nil
+        FrameSize=nil
+    end
 
-        StartPos = Input.Position
-        FrameSize = UI.Size
-        Dragging = true
-
-        Changed = Input.Changed:Connect(function()
-            if Input.UserInputState ~= Enum.UserInputState.End then
-                return
-            end
-
-            Dragging = false
-            if Changed and Changed.Connected then
-                Changed:Disconnect()
-                Changed = nil
-            end
+    local function BeginResize(Input)
+        if Dragging or not IsClickInput(Input) or not UI.Visible then return end
+        StartPos=Input.Position
+        FrameSize=UI.Size
+        Dragging=true
+        Changed=Input.Changed:Connect(function()
+            if Input.UserInputState==Enum.UserInputState.End then StopResize() end
         end)
-    end)
+        InputChanged=UserInputService.InputChanged:Connect(function(ChangeInput)
+            if not Dragging or not StartPos or not FrameSize or not IsHoverInput(ChangeInput) then return end
+            if not UI.Parent or not (ScreenGui and ScreenGui.Parent) then StopResize(); return end
+            local Delta=ChangeInput.Position-StartPos
+            UI.Size=UDim2.new(FrameSize.X.Scale, math.max(Library.MinSize.X, FrameSize.X.Offset+Delta.X), FrameSize.Y.Scale, math.max(Library.MinSize.Y, FrameSize.Y.Offset+Delta.Y))
+            if Callback then Library:SafeCallback(Callback) end
+        end)
+    end
 
-    InputChanged = UserInputService.InputChanged:Connect(function(Input: InputObject)
-        if not UI.Visible or not (ScreenGui and ScreenGui.Parent) then
-            Dragging = false
-            if Changed and Changed.Connected then
-                Changed:Disconnect()
-                Changed = nil
-            end
-
-            return
-        end
-
-        if Dragging and IsHoverInput(Input) then
-            local Delta = Input.Position - StartPos
-            UI.Size = UDim2.new(
-                FrameSize.X.Scale,
-                math.clamp(FrameSize.X.Offset + Delta.X, Library.MinSize.X, math.huge),
-                FrameSize.Y.Scale,
-                math.clamp(FrameSize.Y.Offset + Delta.Y, Library.MinSize.Y, math.huge)
-            )
-            if Callback then
-                Library:SafeCallback(Callback)
-            end
-        end
-    end)
-
-    Library:GiveSignal(InputChanged)
-    Library:GiveSignal(InputBegan)
-
+    InputBegan=DragFrame.InputBegan:Connect(BeginResize)
     UI.Destroying:Once(function()
-        if InputChanged and InputChanged.Connected then
-            InputChanged:Disconnect()
-        end
-
-        if InputBegan and InputBegan.Connected then
-            InputBegan:Disconnect()
-        end
-
-        if Changed and Changed.Connected then
-            Changed:Disconnect()
-        end
-
-        local IdxChanged = table.find(Library.Signals, InputChanged)
-        if IdxChanged then
-            table.remove(Library.Signals, IdxChanged)
-        end
-
-        local IdxBegan = table.find(Library.Signals, InputBegan)
-        if IdxBegan then
-            table.remove(Library.Signals, IdxBegan)
-        end
+        StopResize()
+        if InputBegan and InputBegan.Connected then InputBegan:Disconnect() end
     end)
 end
 
@@ -2446,12 +2527,14 @@ end
 function Library:AddOutline(Frame: GuiObject)
     local OutlineStroke = New("UIStroke", {
         Color = "OutlineColor",
+        Transparency = 1,
         Thickness = 1,
         ZIndex = 2,
         Parent = Frame,
     })
     local ShadowStroke = New("UIStroke", {
         Color = "DarkColor",
+        Transparency = 0.95,
         Thickness = 1.5,
         ZIndex = 1,
         Parent = Frame,
@@ -2584,9 +2667,15 @@ function Library:MakeBoxPopOut(Box: any, Options: {
     Box.PopOutPlaceholder = nil
 
     if not Box.PopOutEnabled then
-        function Box:SetPoppedOut(_Value: boolean, _SetPoppedOut: UDim2) end
-        function Box:TogglePoppedOut() end
-        function Box:RefreshPopOutPlaceholder() end
+        function Box:SetPoppedOut(_Value: boolean, _FloatPosition: UDim2?)
+            return false, "PopOut is disabled for this component."
+        end
+        function Box:TogglePoppedOut()
+            return Box:SetPoppedOut(not Box.PoppedOut)
+        end
+        function Box:RefreshPopOutPlaceholder()
+            return false, "PopOut is disabled for this component."
+        end
         return
     end
 
@@ -2762,17 +2851,24 @@ function Library:MakeBoxPopOut(Box: any, Options: {
                 Child.Parent = Float
             end
 
-            if not table.find(Library.DraggableElements, Float) then
-                table.insert(Library.DraggableElements, Float)
-            end
+            RegisterDraggable(Float)
 
             Box.PopOutFloat = Float
             Box.PoppedOut = true
             SyncPopOutVisibility(Box)
             RaiseFloat()
 
-            Float:GetPropertyChangedSignal("AbsolutePosition"):Connect(function()
-                Box:Resize()
+            local FloatPositionConnection = Float:GetPropertyChangedSignal("AbsolutePosition"):Connect(function()
+                if not Box.Destroyed and Box.PoppedOut then
+                    Box:Resize()
+                end
+            end)
+            table.insert(Box.Connections, FloatPositionConnection)
+
+            Float.Destroying:Once(function()
+                if FloatPositionConnection and FloatPositionConnection.Connected then
+                    FloatPositionConnection:Disconnect()
+                end
             end)
 
             if Options.After then
@@ -2962,8 +3058,10 @@ function Library:MakeBoxPopOut(Box: any, Options: {
     end
 
     BindDragSource(Header)
-    for _, Descendant in Header:QueryDescendants("GuiObject:not(ImageButton)") do
-        BindDragSource(Descendant)
+    for _, Descendant in Header:GetDescendants() do
+        if Descendant:IsA("GuiObject") and not Descendant:IsA("ImageButton") then
+            BindDragSource(Descendant)
+        end
     end
 
     Library:GiveSignal(Header.DescendantAdded:Connect(function(Descendant)
@@ -3062,7 +3160,7 @@ function Library:AddDraggableLabel(...)
 
     local Padding = New("UIPadding", {
         PaddingBottom = UDim.new(0, 6),
-        PaddingLeft = UDim.new(0, 12),
+        PaddingLeft = UDim.new(0, 16),
         PaddingRight = UDim.new(0, 12),
         PaddingTop = UDim.new(0, 6),
         Parent = Label,
@@ -3130,13 +3228,12 @@ function Library:AddDraggableLabel(...)
     DraggableLabel:SetIcon(Icon)
     DraggableLabel.Label = Label
 
-    if not table.find(Library.DraggableElements, Label) then
-        table.insert(Library.DraggableElements, Label)
-    end
+    RegisterDraggable(Label)
 
     PositionDraggable(Label, Label.Position)
 
     function DraggableLabel:Destroy()
+        if DraggableLabel.Destroyed then return end
         DraggableLabel.Destroyed = true
 
         if DraggableLabel.Connections then
@@ -3208,7 +3305,7 @@ function Library:AddDraggableButton(...)
     Library:AddOutline(Button)
 
     local MaxClickDistance = ExcludeDragging and 12 or math.huge
-    Button.InputBegan:Connect(function(Input: InputObject)
+    table.insert(DraggableButton.Connections, Button.InputBegan:Connect(function(Input: InputObject)
         if not IsClickInput(Input) then
             return
         end
@@ -3229,26 +3326,62 @@ function Library:AddDraggableButton(...)
                 Changed = nil
             end
         end)
-    end)
+    end))
+
+    local ButtonIcon
+    local Icon = typeof(Params) == "table" and Params.Icon or nil
+    local IconPosition = typeof(Params) == "table" and (Params.IconPosition or "left") or "left"
 
     function DraggableButton:SetText(Text: string)
-        local X, Y = Library:GetTextBounds(Text, Library.Scheme.Font, 16)
+        local X, Y = Library:GetTextBounds(tostring(Text or ""), Library.Scheme.Font, 16)
 
-        Button.Text = Text
-        Button.Size = UDim2.fromOffset(X * 2, Y * 2)
+        Button.Text = tostring(Text or "")
+        Button.Size = UDim2.fromOffset(math.max(40, X + 24), math.max(26, Y + 12))
+    end
+
+    function DraggableButton:SetIcon(NewIcon: string)
+        Icon = NewIcon
+        local IsNotEmpty = Icon and Trim(tostring(Icon)) ~= ""
+        if IsNotEmpty then
+            local IconData = Library:GetCustomIcon(Icon)
+            assert(IconData, "Icon must be a valid Roblox asset or a valid URL or a valid lucide icon.")
+            ButtonIcon = ButtonIcon or New("ImageLabel", {
+                BackgroundTransparency = 1,
+                ImageColor3 = "FontColor",
+                ImageTransparency = 0.2,
+                Size = UDim2.fromOffset(16, 16),
+                Parent = Button,
+            })
+            Library:ApplyLucideIcon(ButtonIcon, IconData)
+        elseif ButtonIcon then
+            ButtonIcon.Visible = false
+        end
+        if ButtonIcon then ButtonIcon.Visible = IsNotEmpty end
+        DraggableButton:SetIconPosition(IconPosition)
+    end
+
+    function DraggableButton:SetIconPosition(NewPosition: string)
+        IconPosition = string.lower(NewPosition or "left")
+        assert(IconPosition == "left" or IconPosition == "right", "Icon Position needs to be either 'left' or 'right'.")
+        local IsNotEmpty = Icon and Trim(tostring(Icon)) ~= ""
+        if ButtonIcon then
+            ButtonIcon.AnchorPoint = IconPosition == "left" and Vector2.new(0, 0.5) or Vector2.new(1, 0.5)
+            ButtonIcon.Position = IconPosition == "left" and UDim2.new(0, 8, 0.5, 0) or UDim2.new(1, -8, 0.5, 0)
+            ButtonIcon.Visible = IsNotEmpty
+        end
     end
 
     Library:MakeDraggable(Button, Button, true)
     DraggableButton:SetText(Text)
+    DraggableButton:SetIcon(Icon)
     DraggableButton.Button = Button
 
-    if not table.find(Library.DraggableElements, Button) then
-        table.insert(Library.DraggableElements, Button)
-    end
+    RegisterDraggable(Button)
 
     PositionDraggable(Button, Button.Position)
 
     function DraggableButton:Destroy()
+        if DraggableButton.Destroyed then return end
         DraggableButton.Destroyed = true
 
         if DraggableButton.Connections then
@@ -3333,9 +3466,7 @@ function Library:AddDraggableMenu(Name: string)
 
     Library:MakeDraggable(Holder, Label, true)
 
-    if not table.find(Library.DraggableElements, Holder) then
-        table.insert(Library.DraggableElements, Holder)
-    end
+    RegisterDraggable(Holder)
 
     PositionDraggable(Holder, Holder.Position)
 
@@ -3365,7 +3496,10 @@ function Library:AddDraggableImageButton(...)
         ExcludeDragging = select(5, ...)
     end
 
-    local DraggableImageButton = {}
+    local DraggableImageButton = {
+        Connections = {},
+        Destroyed = false,
+    }
 
     local Button = New("TextButton", {
         BackgroundColor3 = "BackgroundColor",
@@ -3404,7 +3538,7 @@ function Library:AddDraggableImageButton(...)
     Library:AddOutline(Button)
 
     local MaxClickDistance = ExcludeDragging and 12 or math.huge
-    Button.InputBegan:Connect(function(Input: InputObject)
+    table.insert(DraggableImageButton.Connections, Button.InputBegan:Connect(function(Input: InputObject)
         if not IsClickInput(Input) then
             return
         end
@@ -3425,7 +3559,7 @@ function Library:AddDraggableImageButton(...)
                 Changed = nil
             end
         end)
-    end)
+    end))
 
     function DraggableImageButton:SetIcon(NewIcon: string)
         Icon = NewIcon or Icon
@@ -3437,18 +3571,42 @@ function Library:AddDraggableImageButton(...)
     end
 
     function DraggableImageButton:SetIconSize(NewSize: number)
+        assert(typeof(NewSize) == "number" and NewSize == NewSize and NewSize > 0 and NewSize ~= math.huge, "Icon size must be a positive finite number.")
         IconSize = NewSize
         IconImage.Size = UDim2.fromOffset(IconSize, IconSize)
         Button.Size = UDim2.fromOffset(IconSize + 12, IconSize + 12)
+    end
+
+    function DraggableImageButton:SetVisible(Visible: boolean)
+        assert(typeof(Visible) == "boolean", "Visible must be a boolean.")
+        Button.Visible = Visible
+    end
+
+    function DraggableImageButton:Destroy()
+        if DraggableImageButton.Destroyed then return end
+        DraggableImageButton.Destroyed = true
+        for _, Connection in DraggableImageButton.Connections do
+            if Connection and Connection.Connected then
+                Connection:Disconnect()
+            end
+        end
+        table.clear(DraggableImageButton.Connections)
+
+        local ElemIdx = table.find(Library.DraggableElements, Button)
+        if ElemIdx then
+            table.remove(Library.DraggableElements, ElemIdx)
+        end
+
+        if Button then
+            Button:Destroy()
+        end
     end
 
     Library:MakeDraggable(Button, Button, true)
     DraggableImageButton:SetIcon(Icon)
     DraggableImageButton.Button = Button
 
-    if not table.find(Library.DraggableElements, Button) then
-        table.insert(Library.DraggableElements, Button)
-    end
+    RegisterDraggable(Button)
 
     PositionDraggable(Button, Button.Position)
 
@@ -3627,7 +3785,13 @@ Watermark.Visible = Holder.Visible
         end
 
         local Getter = typeof(Data.Text) == "function" and Data.Text or nil
-        local InitialText = Getter and select(2, pcall(Getter)) or Data.Text
+        local InitialText = Data.Text
+        if Getter then
+            local GetterValue = Library:SafeCallback(Getter)
+            if typeof(GetterValue) == "string" then
+                InitialText = GetterValue
+            end
+        end
 
         local TextLabel = New("TextLabel", {
             AutomaticSize = Enum.AutomaticSize.XY,
@@ -3651,8 +3815,8 @@ Watermark.Visible = Holder.Visible
     function Watermark:Refresh()
         for _, Cell in Watermark.Cells do
             if Cell.Getter and Cell.Label then
-                local Ok, Value = pcall(Cell.Getter)
-                if Ok and typeof(Value) == "string" then
+                local Value = Library:SafeCallback(Cell.Getter)
+                if typeof(Value) == "string" then
                     Cell.Label.Text = Value
                 end
             end
@@ -3716,9 +3880,7 @@ end
         end
     end
 
-    if not table.find(Library.DraggableElements, Holder) then
-        table.insert(Library.DraggableElements, Holder)
-    end
+    RegisterDraggable(Holder)
 
     Watermark:SetSegments(Segments or {})
     PositionDraggable(Holder, Holder.Position)
@@ -3728,7 +3890,7 @@ end
     local Accumulator = 0
     table.insert(
         Watermark.Connections,
-        RunService.Heartbeat:Connect(function(DeltaTime)
+        Library:GiveSignal(RunService.Heartbeat:Connect(function(DeltaTime)
             if Watermark.Destroyed or not Holder.Visible then
                 return
             end
@@ -3738,7 +3900,7 @@ end
                 Accumulator = 0
                 Watermark:Refresh()
             end
-        end)
+        end))
     )
 
     return Watermark
@@ -3810,6 +3972,7 @@ function Library:AddContextMenu(
 
     New("UIStroke", {
         Color = "OutlineColor",
+        Transparency = 1,
         Parent = Menu,
     })
 
@@ -3982,8 +4145,16 @@ function Library:AddContextMenu(
 
             local HolderAllowed = Library:IsInsideFrame(Library.WindowContainer, Holder)
             if not HolderAllowed then
-                for _, Surface in Library.DraggableElements do
-                    if not (Surface and Library:IsInsideFrame(Surface, Holder)) then
+                for Index = #Library.DraggableElements, 1, -1 do
+                    local Surface = Library.DraggableElements[Index]
+
+                    if not IsGuiObjectInstance(Surface) then
+                        warn("Obsidian: removing invalid draggable entry " .. tostring(Surface))
+                        table.remove(Library.DraggableElements, Index)
+                        continue
+                    end
+
+                    if not Library:IsInsideFrame(Surface, Holder) then
                         continue
                     end
 
@@ -4068,6 +4239,7 @@ function Library:AddContextMenu(
     end
 
     function Table:Destroy()
+        if Table.Destroyed then return end
         Table.Destroyed = true
 
         if Table.Connections then
@@ -4177,6 +4349,9 @@ function Library:AddTooltip(InfoStr: string, DisabledInfoStr: string, HoverInsta
     }
 
     local function DoHover()
+        if TooltipTable.Destroyed or Library.Unloaded or not HoverInstance.Parent then
+            return
+        end
         if
             CurrentHoverInstance == HoverInstance
             or Library.ActiveDialog
@@ -4199,7 +4374,10 @@ function Library:AddTooltip(InfoStr: string, DisabledInfoStr: string, HoverInsta
         TooltipLabel.Visible = true
 
         while
-            (Library.Toggled or Library.ActiveLoading)
+            not TooltipTable.Destroyed
+            and not Library.Unloaded
+            and HoverInstance.Parent
+            and (Library.Toggled or Library.ActiveLoading)
             and not Library.ActiveDialog
             and Library:MouseIsOverFrame(HoverInstance, Mouse)
             and not (CurrentMenu and Library:MouseIsOverFrame(CurrentMenu.Menu, Mouse))
@@ -4237,6 +4415,17 @@ function Library:AddTooltip(InfoStr: string, DisabledInfoStr: string, HoverInsta
     end))
 
     function TooltipTable:Destroy()
+        if TooltipTable.Destroyed then return end
+        TooltipTable.Destroyed = true
+
+        if CurrentHoverInstance == HoverInstance then
+            CurrentHoverInstance = nil
+        end
+
+        local TooltipIdx = table.find(Tooltips, TooltipTable)
+        if TooltipIdx then
+            table.remove(Tooltips, TooltipIdx)
+        end
         for Index = #TooltipTable.Signals, 1, -1 do
             local Connection = table.remove(TooltipTable.Signals, Index)
             if Connection and Connection.Connected then
@@ -4253,9 +4442,11 @@ function Library:AddTooltip(InfoStr: string, DisabledInfoStr: string, HoverInsta
         end
     end
 
-    table.insert(Tooltips, TooltipLabel)
+    table.insert(Tooltips, TooltipTable)
     return TooltipTable
 end
+
+Library.AddToolTip = Library.AddTooltip
 
 function Library:OnUnload(Callback)
     table.insert(Library.UnloadSignals, Callback)
@@ -4267,6 +4458,7 @@ do
 
     function Funcs:AddKeyPicker(Idx, Info)
         if self.Destroyed then return nil end
+        AssertIndexAvailable(Options, Idx, "Option")
 
         Info = Library:Validate(Info, Templates.KeyPicker)
 
@@ -4320,6 +4512,10 @@ do
             end
         end
 
+        KeyPicker.Mode = Info.Mode
+        assert(typeof(KeyPicker.Mode) == "string" and table.find(Info.Modes, KeyPicker.Mode),
+            string.format("Invalid KeyPicker mode %q.", tostring(KeyPicker.Mode)))
+
         local Picking = false
         local IsForButton = ParentObj.Type == "Button" or ParentObj.Type == "SubButton"
 
@@ -4335,6 +4531,21 @@ do
             [Enum.UserInputType.MouseButton2] = "MB2",
             [Enum.UserInputType.MouseButton3] = "MB3",
         }
+
+        local function ResolveKeyName(KeyName)
+            if KeyName == nil or tostring(KeyName) == "" or KeyName == "None" then
+                return "None", nil
+            end
+
+            KeyName = tostring(KeyName)
+            local KeyCode = SpecialKeys[KeyName] or Enum.KeyCode[KeyName]
+            assert(KeyCode, string.format("Invalid default key %q.", KeyName))
+            return KeyName, KeyCode
+        end
+
+        KeyPicker.Value = ResolveKeyName(KeyPicker.Value)
+        KeyPicker.Modifiers = table.clone(KeyPicker.Modifiers or {})
+        KeyPicker.DisplayValue = KeyPicker.Value
 
         -- Modifiers
         local Modifiers = {
@@ -4439,7 +4650,7 @@ do
             local ValidModifiers = {}
 
             for _, name in CurrentModifiers do
-                if not Modifiers[name] then
+                if not Modifiers[name] or table.find(ValidModifiers, name) then
                     continue
                 end
 
@@ -4685,7 +4896,6 @@ do
                 Checkbox.Visible = not Normal
             end
 
-            KeyPicker.DoClick = function(...) end --// make luau lsp shut up
             table.insert(KeyPicker.Connections, Holder.MouseButton1Click:Connect(function()
                 if KeybindsToggle.Normal then
                     return
@@ -5027,30 +5237,20 @@ do
                 return true
             elseif KeyPicker.Mode == "Hold" then
                 local Key = KeyPicker.Value
-                if Key == "None" then
-                    return false
-                end
-
-                if not AreModifiersHeld(KeyPicker.Modifiers) then
-                    return false
-                end
-
-                if Picking then
-                    return false
-                end
+                if Key == "None" then return false end
+                if not AreModifiersHeld(KeyPicker.Modifiers) or Picking then return false end
 
                 if SpecialKeys[Key] ~= nil then
-                    if Library.Toggled then
-                        return false
-                    end
-
+                    if Library.Toggled then return false end
                     return UserInputService:IsMouseButtonPressed(SpecialKeys[Key])
                         and not UserInputService:GetFocusedTextBox()
-                else
-                    return UserInputService:IsKeyDown(Enum.KeyCode[Key] :: any) and not UserInputService:GetFocusedTextBox()
                 end
+
+                local KeyCode = Enum.KeyCode[Key]
+                if not KeyCode then return false end
+                return UserInputService:IsKeyDown(KeyCode) and not UserInputService:GetFocusedTextBox()
             else
-                return KeyPicker.Toggled
+                return KeyPicker.Toggled == true
             end
         end
 
@@ -5091,23 +5291,14 @@ do
             end
         end
 
-        function KeyPicker:RunChanged(IsKeyValid, KeyCode)
-            if ParentObj.Disabled then
-                return
-            end
+        function KeyPicker:RunChanged(_IsKeyValid, KeyCode)
+            if ParentObj.Disabled then return end
 
-            if IsKeyValid == nil or KeyCode == nil then
-                IsKeyValid, KeyCode = pcall(function()
-                    if KeyPicker.Value == "None" then
-                        return nil
-                    end
-
-                    if SpecialKeys[KeyPicker.Value] == nil then
-                        return Enum.KeyCode[KeyPicker.Value]
-                    end
-
-                    return SpecialKeys[KeyPicker.Value]
-                end)
+            if KeyPicker.Value == "None" then
+                KeyCode = nil
+            elseif KeyCode == nil then
+                KeyCode = SpecialKeys[KeyPicker.Value] or Enum.KeyCode[KeyPicker.Value]
+                assert(KeyCode, string.format("KeyPicker contains invalid key %q.", tostring(KeyPicker.Value)))
             end
 
             local NewModifiers = ConvertToInputModifiers(KeyPicker.Modifiers)
@@ -5116,41 +5307,24 @@ do
         end
 
         function KeyPicker:SetValue(Data)
-            local Key, Mode, Modifiers = Data[1], Data[2], Data[3]
+            assert(typeof(Data) == "table", "KeyPicker:SetValue expects { key, mode, modifiers }.")
+            local Key = Data[1]
+            local Mode = Data[2] or KeyPicker.Mode
+            local Modifiers = Data[3]
 
-            local IsKeyValid, KeyCode = pcall(function()
-                if Key == "None" then
-                    Key = nil
-                    return nil
-                end
+            local KeyName, KeyCode = ResolveKeyName(Key)
+            Key = KeyName
+            assert(table.find(Info.Modes, Mode), string.format("Invalid keybind mode %q passed to KeyPicker:SetValue.", tostring(Mode)))
 
-                if SpecialKeys[Key] == nil then
-                    return Enum.KeyCode[Key]
-                end
-
-                return SpecialKeys[Key]
-            end)
-
-            if Key == nil then
-                KeyPicker.Value = "None"
-            elseif IsKeyValid then
-                KeyPicker.Value = Key
-            else
-                KeyPicker.Value = "Unknown"
-            end
-
-            KeyPicker.Modifiers =
-                VerifyModifiers(if typeof(Modifiers) == "table" then Modifiers else KeyPicker.Modifiers)
+            KeyPicker.Value = Key
+            KeyPicker.Modifiers = VerifyModifiers(if typeof(Modifiers) == "table" then Modifiers else KeyPicker.Modifiers)
             KeyPicker.DisplayValue = if GetTableSize(KeyPicker.Modifiers) > 0
                 then (table.concat(KeyPicker.Modifiers, " + ") .. " + " .. KeyPicker.Value)
                 else KeyPicker.Value
 
-            if ModeButtons[Mode] then
-                ModeButtons[Mode]:Select()
-            end
-
+            ModeButtons[Mode]:Select()
             KeyPicker:Update()
-            KeyPicker:RunChanged(IsKeyValid, KeyCode)
+            KeyPicker:RunChanged(true, KeyCode)
         end
 
         function KeyPicker:SetText(Text)
@@ -5193,6 +5367,10 @@ do
                     end
                 end
 
+                if not KeyName then
+                    return false
+                end
+
                 if KeyName then
                     if IsMod then
                         if KeyPicker.WhitelistedModifiers and #KeyPicker.WhitelistedModifiers > 0 and not table.find(KeyPicker.WhitelistedModifiers, KeyName) then
@@ -5216,18 +5394,30 @@ do
                 return true
             end
 
-            -- Wait for the first valid InputBegan --
-            while true do
-                local InputObj = UserInputService.InputBegan:Wait()
-                if UserInputService:GetFocusedTextBox() ~= nil then
-                    SetPickingState(false)
-                    return
-                end
+            -- Wait for a valid input without blocking library teardown.
+            while not Library.Unloaded and not KeyPicker.Destroyed and not CurrentInput do
+                local InputObj
+                local Connection = UserInputService.InputBegan:Connect(function(InputObj_)
+                    if not InputObj and IsValidInput(InputObj_) then
+                        InputObj = InputObj_
+                    end
+                end)
 
-                if IsValidInput(InputObj) then
+                repeat task.wait() until InputObj or Library.Unloaded or KeyPicker.Destroyed
+
+                if Connection and Connection.Connected then Connection:Disconnect() end
+                if InputObj then
+                    if UserInputService:GetFocusedTextBox() ~= nil then
+                        SetPickingState(false)
+                        return
+                    end
                     CurrentInput = InputObj
-                    break
                 end
+            end
+
+            if Library.Unloaded or KeyPicker.Destroyed or not CurrentInput then
+                SetPickingState(false)
+                return
             end
 
             -- If it's a modifier key, we wait for either its release or another input --
@@ -5292,21 +5482,22 @@ do
                 end
             end
 
-            local Key = "Unknown"
+            local Key
             if SpecialKeysInput[CurrentInput.UserInputType] ~= nil then
                 Key = SpecialKeysInput[CurrentInput.UserInputType]
             elseif CurrentInput.UserInputType == Enum.UserInputType.Keyboard then
                 Key = CurrentInput.KeyCode == Enum.KeyCode.Escape and "None" or CurrentInput.KeyCode.Name
             end
 
-            ActiveModifiers = if CurrentInput.KeyCode == Enum.KeyCode.Escape or Key == "Unknown" then {} else ActiveModifiers
+            assert(Key, "Unsupported key input reached the KeyPicker assignment path.")
+            ActiveModifiers = if CurrentInput.KeyCode == Enum.KeyCode.Escape then {} else ActiveModifiers
 
             KeyPicker.Toggled = if ParentObj.Type == "Toggle" then ParentObj.Value else false
             KeyPicker:SetValue({ Key, KeyPicker.Mode, ActiveModifiers })
 
             repeat
                 task.wait()
-            until not IsInputDown(CurrentInput) or UserInputService:GetFocusedTextBox()
+            until Library.Unloaded or KeyPicker.Destroyed or not IsInputDown(CurrentInput) or UserInputService:GetFocusedTextBox()
 
             SetPickingState(false)
         end))
@@ -5328,7 +5519,6 @@ do
             if
                 ParentObj.Disabled
                 or KeyPicker.Mode == "Always"
-                or KeyPicker.Value == "Unknown"
                 or KeyPicker.Value == "None"
                 or Picking
                 or Library.IsPicking
@@ -5457,6 +5647,7 @@ do
     end
     function Funcs:AddColorPicker(Idx, Info)
         if self.Destroyed then return nil end
+        AssertIndexAvailable(Options, Idx, "Option")
 
         Info = Library:Validate(Info, Templates.ColorPicker)
 
@@ -5488,6 +5679,7 @@ do
 
         local HolderStroke = New("UIStroke", {
             Color = Library:GetDarkerColor(ColorPicker.Value),
+            Transparency = 0.25,
             Parent = Holder,
         })
 
@@ -5838,15 +6030,15 @@ do
             end
 
             table.insert(ColorPicker.Connections, ResizeGrabber.InputBegan:Connect(function(Input: InputObject)
+                if not IsClickInput(Input) or ColorPicker.Destroyed then return end
                 Library.CantDragForced = true
-                local StartMouse = Vector2.new(Mouse.X, Mouse.Y)
+                local StartMouse = Input.Position
                 local StartWidth = ColorPicker.MapWidth
                 local StartHeight = ColorPicker.MapHeight
 
-                while IsDragInput(Input) and not ColorPicker.Destroyed do
-                    local Delta = Vector2.new(Mouse.X, Mouse.Y) - StartMouse
+                while IsDragInput(Input) and not ColorPicker.Destroyed and not Library.Unloaded do
+                    local Delta = GetCurrentPointerPosition(Input) - StartMouse
                     UpdateColorMenuSize(StartWidth + Delta.X, StartHeight + Delta.Y)
-
                     RunService.RenderStepped:Wait()
                 end
 
@@ -5966,7 +6158,6 @@ do
                 Library.CopiedColor = { ColorPicker.Value, ColorPicker.Transparency }
             end)
 
-            ColorPicker.SetValueRGB = function(...) end --// make luau lsp shut up
             CreateButton("Paste color", function()
                 if not Library.CopiedColor then
                     return
@@ -6108,6 +6299,7 @@ do
 
         --// End \\--
         function ColorPicker:SetHSVFromRGB(Color)
+            assert(typeof(Color) == "Color3", "ColorPicker:SetHSVFromRGB expects a Color3.")
             ColorPicker.Hue, ColorPicker.Sat, ColorPicker.Vib = Color:ToHSV()
         end
 
@@ -6188,18 +6380,29 @@ do
 
         function ColorPicker:SetValue(HSV, Transparency)
             if typeof(HSV) == "Color3" then
-                ColorPicker:SetValueRGB(HSV, Transparency)
-                return
+                return ColorPicker:SetValueRGB(HSV, Transparency)
             end
-
-            local Color = Color3.fromHSV(HSV[1], HSV[2], HSV[3])
-            ColorPicker.Transparency = Info.Transparency and Transparency or 0
+            assert(typeof(HSV) == "table", "ColorPicker:SetValue expects a Color3 or {H, S, V} table.")
+            local H = math.clamp(tonumber(HSV[1]) or 0, 0, 1)
+            local S = math.clamp(tonumber(HSV[2]) or 0, 0, 1)
+            local V = math.clamp(tonumber(HSV[3]) or 0, 0, 1)
+            local Color = Color3.fromHSV(H, S, V)
+            if Info.Transparency then
+                ColorPicker.Transparency = math.clamp(tonumber(Transparency) or 0, 0, 1)
+            else
+                ColorPicker.Transparency = 0
+            end
             ColorPicker:SetHSVFromRGB(Color)
             ColorPicker:Update()
         end
 
         function ColorPicker:SetValueRGB(Color, Transparency)
-            ColorPicker.Transparency = Info.Transparency and Transparency or 0
+            assert(typeof(Color) == "Color3", "ColorPicker:SetValueRGB expects a Color3.")
+            if Info.Transparency then
+                ColorPicker.Transparency = math.clamp(tonumber(Transparency) or 0, 0, 1)
+            else
+                ColorPicker.Transparency = 0
+            end
             ColorPicker:SetHSVFromRGB(Color)
             ColorPicker:Update()
         end
@@ -6224,16 +6427,17 @@ do
             while IsDragInput(Input) and not ColorPicker.Destroyed do
                 local MinX = SatVipMap.AbsolutePosition.X
                 local MaxX = MinX + SatVipMap.AbsoluteSize.X
-                local LocationX = math.clamp(Mouse.X, MinX, MaxX)
+                local Pointer = GetCurrentPointerPosition(Input)
+                local LocationX = math.clamp(Pointer.X, MinX, MaxX)
 
                 local MinY = SatVipMap.AbsolutePosition.Y
                 local MaxY = MinY + SatVipMap.AbsoluteSize.Y
-                local LocationY = math.clamp(Mouse.Y, MinY, MaxY)
+                local LocationY = math.clamp(Pointer.Y, MinY, MaxY)
 
                 local OldSat = ColorPicker.Sat
                 local OldVib = ColorPicker.Vib
-                ColorPicker.Sat = (LocationX - MinX) / (MaxX - MinX)
-                ColorPicker.Vib = 1 - ((LocationY - MinY) / (MaxY - MinY))
+                ColorPicker.Sat = (LocationX - MinX) / math.max(MaxX - MinX, 1)
+                ColorPicker.Vib = 1 - ((LocationY - MinY) / math.max(MaxY - MinY, 1))
 
                 if ColorPicker.Sat ~= OldSat or ColorPicker.Vib ~= OldVib then
                     ColorPicker:Update()
@@ -6247,10 +6451,11 @@ do
             while IsDragInput(Input) and not ColorPicker.Destroyed do
                 local Min = HueSelector.AbsolutePosition.Y
                 local Max = Min + HueSelector.AbsoluteSize.Y
-                local Location = math.clamp(Mouse.Y, Min, Max)
+                local Pointer = GetCurrentPointerPosition(Input)
+                local Location = math.clamp(Pointer.Y, Min, Max)
 
                 local OldHue = ColorPicker.Hue
-                ColorPicker.Hue = (Location - Min) / (Max - Min)
+                ColorPicker.Hue = (Location - Min) / math.max(Max - Min, 1)
 
                 if ColorPicker.Hue ~= OldHue then
                     ColorPicker:Update()
@@ -6265,10 +6470,11 @@ do
                 while IsDragInput(Input) and not ColorPicker.Destroyed do
                     local Min = TransparencySelector.AbsolutePosition.Y
                     local Max = TransparencySelector.AbsolutePosition.Y + TransparencySelector.AbsoluteSize.Y
-                    local Location = math.clamp(Mouse.Y, Min, Max)
+                    local Pointer = GetCurrentPointerPosition(Input)
+                    local Location = math.clamp(Pointer.Y, Min, Max)
 
                     local OldTransparency = ColorPicker.Transparency
-                    ColorPicker.Transparency = (Location - Min) / (Max - Min)
+                    ColorPicker.Transparency = (Location - Min) / math.max(Max - Min, 1)
 
                     if ColorPicker.Transparency ~= OldTransparency then
                         ColorPicker:Update()
@@ -6299,7 +6505,7 @@ do
 
             local R, G, B = RgbBox.Text:match("(%d+),%s*(%d+),%s*(%d+)")
             if R and G and B then
-                ColorPicker:SetHSVFromRGB(Color3.fromRGB(R, G, B))
+                ColorPicker:SetHSVFromRGB(Color3.fromRGB(tonumber(R) or 0, tonumber(G) or 0, tonumber(B) or 0))
             end
 
             ColorPicker:Update()
@@ -6455,10 +6661,41 @@ local function ResolvePlayerName(Player: any, UserId: number): string
     return tostring(UserId)
 end
 
-local function GetPlayerThumbnail(UserId: number, ThumbnailType: string?, Compact: boolean): string
-    --// Compact shows more of the character; full-body thumbnails do not load on
-    --// every client, so the reliable bust is the default there
-    local Type = PLAYER_THUMBNAIL_TYPES[string.lower(ThumbnailType or "")]
+local function NormalizeThumbnailType(ThumbnailType: any): string?
+    if ThumbnailType == nil then
+        return nil
+    end
+
+    local Value = ThumbnailType
+    if typeof(Value) == "EnumItem" then
+        Value = Value.Name
+    else
+        Value = tostring(Value)
+    end
+
+    Value = string.lower(Value)
+    Value = Value:gsub("enum%.thumbnailtype%.", "")
+    Value = Value:gsub("avatars?%_?", "avatar")
+    Value = Value:gsub("[^%w]", "")
+
+    local Aliases = {
+        headshot = "AvatarHeadShot",
+        head = "AvatarHeadShot",
+        avatarheadshot = "AvatarHeadShot",
+        bust = "AvatarBust",
+        avatarbust = "AvatarBust",
+        avatar = "AvatarThumbnail",
+        body = "AvatarThumbnail",
+        full = "AvatarThumbnail",
+        avatarthumbnail = "AvatarThumbnail",
+    }
+
+    return Aliases[Value] or PLAYER_THUMBNAIL_TYPES[Value]
+end
+
+local function GetPlayerThumbnail(UserId: number, ThumbnailType: any, Compact: boolean): string
+    --// Accept strings, Enum.ThumbnailType values and legacy aliases.
+    local Type = NormalizeThumbnailType(ThumbnailType)
         or (Compact and "AvatarBust" or "AvatarHeadShot")
     local Size = Type == "AvatarThumbnail" and 420 or 150
 
@@ -6775,7 +7012,7 @@ local function CreatePlayerCard(Info, Parent: Instance, IsCompact: boolean, Inse
     end
 
     function PlayerInfo:SetHeight(Height: number)
-        assert(Height > 0, "Height must be greater than 0.")
+        assert(typeof(Height) == "number" and Height == Height and Height ~= math.huge and Height ~= -math.huge and Height > 0, "Height must be a finite number greater than 0.")
 
         PlayerInfo.Height = Height
 
@@ -6907,6 +7144,7 @@ do
         end
 
         function Divider:Destroy()
+            if Divider.Destroyed then return end
             Divider.Destroyed = true
 
             if Divider.Connections then
@@ -6958,6 +7196,7 @@ do
 
         local Groupbox = self
         local Container = Groupbox.Container
+        AssertIndexAvailable(Labels, Data.Idx, "Label")
 
         local Label = {
             Connections = {},
@@ -7053,6 +7292,7 @@ do
         end
 
         function Label:Destroy()
+            if Label.Destroyed then return end
             Label.Destroyed = true
 
             if Label.Connections then
@@ -7138,6 +7378,7 @@ do
 
         local Groupbox = self
         local Container = Groupbox.Container
+        AssertIndexAvailable(Buttons, Info.Idx, "Button")
 
         local Button = {
             Connections = {},
@@ -7188,7 +7429,7 @@ do
 
             local Stroke = New("UIStroke", {
                 Color = "OutlineColor",
-                Transparency = Button.Disabled and 0.5 or 0,
+                Transparency = 1,
                 Parent = Base,
             })
 
@@ -7211,6 +7452,7 @@ do
 
                 Button.Tween = TweenService:Create(Button.Base, Library.TweenInfo, {
                     TextTransparency = 0,
+                    BackgroundTransparency = 0.06,
                 })
                 Button.Tween:Play()
             end))
@@ -7221,6 +7463,7 @@ do
 
                 Button.Tween = TweenService:Create(Button.Base, Library.TweenInfo, {
                     TextTransparency = 0.4,
+                    BackgroundTransparency = 0,
                 })
                 Button.Tween:Play()
             end))
@@ -7296,7 +7539,7 @@ do
                 SubButton.Base.BackgroundColor3 = SubButton.Disabled and Library.Scheme.BackgroundColor
                     or Library.Scheme.MainColor
                 SubButton.Base.TextTransparency = SubButton.Disabled and 0.8 or 0.4
-                SubButton.Stroke.Transparency = SubButton.Disabled and 0.5 or 0
+                SubButton.Stroke.Transparency = 1
 
                 Library.Registry[SubButton.Base].BackgroundColor3 = SubButton.Disabled and "BackgroundColor"
                     or "MainColor"
@@ -7392,7 +7635,7 @@ do
             Button.Base.BackgroundColor3 = Button.Disabled and Library.Scheme.BackgroundColor
                 or Library.Scheme.MainColor
             Button.Base.TextTransparency = Button.Disabled and 0.8 or 0.4
-            Button.Stroke.Transparency = Button.Disabled and 0.5 or 0
+            Button.Stroke.Transparency = 1
 
             Library.Registry[Button.Base].BackgroundColor3 = Button.Disabled and "BackgroundColor" or "MainColor"
         end
@@ -7446,6 +7689,7 @@ do
         Button.AddKeyPicker = BaseAddons.__index.AddKeyPicker
 
         function Button:Destroy()
+            if Button.Destroyed then return end
             Button.Destroyed = true
 
             if Button.Connections then
@@ -7493,6 +7737,7 @@ do
 
     function Funcs:AddCheckbox(Idx, Info)
         if self.Destroyed then return nil end
+        AssertIndexAvailable(Toggles, Idx, "Toggle")
 
         Info = Library:Validate(Info, Templates.Toggle)
 
@@ -7629,6 +7874,12 @@ do
         end
 
         function Toggle:SetValue(Value)
+            Value = Value == true
+            if Toggle.Value == Value then
+                Toggle:Display()
+                Library:UpdateDependencyBoxes()
+                return
+            end
             Toggle.Value = Value
             Toggle:Display()
 
@@ -7708,6 +7959,7 @@ do
         Toggles[Idx] = Toggle
 
         function Toggle:Destroy()
+            if Toggle.Destroyed then return end
             Toggle.Destroyed = true
 
             if Toggle.Connections then
@@ -7747,6 +7999,7 @@ do
 
     function Funcs:AddToggle(Idx, Info)
         if self.Destroyed then return nil end
+        AssertIndexAvailable(Toggles, Idx, "Toggle")
 
         if Library.ForceCheckbox then
             return Funcs.AddCheckbox(self, Idx, Info)
@@ -7830,6 +8083,7 @@ do
         })
         local SwitchStroke = New("UIStroke", {
             Color = "OutlineColor",
+            Transparency = 0.68,
             Parent = Switch,
         })
 
@@ -7903,6 +8157,12 @@ do
         end
 
         function Toggle:SetValue(Value)
+            Value = Value == true
+            if Toggle.Value == Value then
+                Toggle:Display()
+                Library:UpdateDependencyBoxes()
+                return
+            end
             Toggle.Value = Value
             Toggle:Display()
 
@@ -8021,6 +8281,7 @@ do
 
     function Funcs:AddInput(Idx, Info)
         if self.Destroyed then return nil end
+        AssertIndexAvailable(Options, Idx, "Option")
 
         if typeof(Info) == "table" and (typeof(Info.VerifyValue) == "function" and Info.Finished ~= true) then
             Info.Finished = true
@@ -8045,6 +8306,7 @@ do
             Placeholder = Info.Placeholder,
             AllowEmpty = Info.AllowEmpty,
             EmptyReset = Info.EmptyReset,
+            MaxLength = Info.MaxLength,
 
             Tooltip = Info.Tooltip,
             DisabledTooltip = Info.DisabledTooltip,
@@ -8085,7 +8347,8 @@ do
             Size = UDim2.new(1, 0, 0, 21),
             Text = Input.Value,
             TextEditable = not Input.Disabled,
-            TextScaled = true,
+            TextScaled = false,
+            TextSize = 14,
             TextXAlignment = Enum.TextXAlignment.Left,
             Parent = Holder,
         })
@@ -8100,6 +8363,7 @@ do
 
         local BoxStroke = New("UIStroke", {
             Color = "OutlineColor",
+            Transparency = 0.72,
             Parent = Box,
         })
 
@@ -8138,27 +8402,17 @@ do
         end
 
         function Input:SetValue(Text)
-            if not Input.AllowEmpty and Trim(Text) == "" then
-                Text = Input.EmptyReset
+            Text = tostring(Text or "")
+            if not Input.AllowEmpty and Trim(Text) == "" then Text = tostring(Input.EmptyReset) end
+            if Input.MaxLength and #Text > Input.MaxLength then Text = Text:sub(1, Input.MaxLength) end
+            if Input.Numeric and Text ~= "" and not tonumber(Text) then Text = tostring(Input.Value or Input.EmptyReset) end
+            if typeof(Input.VerifyValue) == "function" and Text ~= tostring(Input.EmptyReset) then
+                local Verified = Input.VerifyValue(Text)
+                if Verified ~= true then Text = tostring(Input.EmptyReset) end
             end
-
-            if Info.MaxLength and #Text > Info.MaxLength then
-                Text = Text:sub(1, Info.MaxLength)
-            end
-
-            if Input.Numeric then
-                if #tostring(Text) > 0 and not tonumber(Text) then
-                    Text = Input.Value
-                end
-            end
-
-            if typeof(Info.VerifyValue) == "function" and (Text ~= Input.EmptyReset and Info.VerifyValue(Text) ~= true) then
-                Text = Input.EmptyReset
-            end
-
             Input.Value = Text
             Box.Text = Text
-
+            Library:UpdateDependencyBoxes()
             Input:RunChanged()
         end
 
@@ -8248,6 +8502,7 @@ do
         Options[Idx] = Input
 
         function Input:Destroy()
+            if Input.Destroyed then return end
             Input.Destroyed = true
 
             if Input.Connections then
@@ -8278,18 +8533,23 @@ do
 
     function Funcs:AddSlider(Idx, Info)
         if self.Destroyed then return nil end
+        AssertIndexAvailable(Options, Idx, "Option")
 
         Info = Library:Validate(Info, Templates.Slider)
 
         local Groupbox = self
         local Container = Groupbox.Container
 
+        assert(typeof(Info.Min) == "number" and typeof(Info.Max) == "number", "Slider Min and Max must be numbers.")
+        assert(Info.Max > Info.Min, "Slider Max must be greater than Min.")
+        assert(typeof(Info.Rounding) == "number" and Info.Rounding >= 0 and Info.Rounding % 1 == 0, "Slider Rounding must be a non-negative integer.")
+
         local Slider = {
             Connections = {},
             Destroyed = false,
 
             Text = Info.Text,
-            Value = Info.Default,
+            Value = math.clamp(Round(tonumber(Info.Default) or Info.Min, Info.Rounding), Info.Min, Info.Max),
 
             Min = Info.Min,
             Max = Info.Max,
@@ -8457,7 +8717,8 @@ do
                 end
             end
 
-            local X = (Slider.Value - Slider.Min) / (Slider.Max - Slider.Min)
+            local Range = Slider.Max - Slider.Min
+            local X = math.clamp((Slider.Value - Slider.Min) / Range, 0, 1)
             Fill.Size = UDim2.fromScale(X, 1)
         end
 
@@ -8466,19 +8727,21 @@ do
         end
 
         function Slider:SetMax(Value)
-            assert(Value > Slider.Min, "Max value cannot be less than the current min value.")
-
-            Slider:SetValue(math.clamp(Slider.Value, Slider.Min, Value))
+            assert(typeof(Value) == "number" and Value > Slider.Min, "Max value must be a number greater than the current min value.")
             Slider.Max = Value
+            Slider.Value = math.clamp(Round(Slider.Value, Slider.Rounding), Slider.Min, Slider.Max)
             Slider:Display()
+            Library:UpdateDependencyBoxes()
+            Slider:RunChanged()
         end
 
         function Slider:SetMin(Value)
-            assert(Value < Slider.Max, "Min value cannot be greater than the current max value.")
-
-            Slider:SetValue(math.clamp(Slider.Value, Value, Slider.Max))
+            assert(typeof(Value) == "number" and Value < Slider.Max, "Min value must be a number less than the current max value.")
             Slider.Min = Value
+            Slider.Value = math.clamp(Round(Slider.Value, Slider.Rounding), Slider.Min, Slider.Max)
             Slider:Display()
+            Library:UpdateDependencyBoxes()
+            Slider:RunChanged()
         end
 
         function Slider:RunChanged()
@@ -8492,16 +8755,15 @@ do
 
         function Slider:SetValue(Str)
             local Num = tonumber(Str)
-            if not Num or Num == Slider.Value then
-                return
-            end
-
-            Num = math.clamp(Num, Slider.Min, Slider.Max)
-
+            if not Num then return false end
+            Num = math.clamp(Round(Num, Slider.Rounding), Slider.Min, Slider.Max)
+            if Num == Slider.Value then return false end
             Slider.Value = Num
             Slider:Display()
+            Library:UpdateDependencyBoxes()
 
             Slider:RunChanged()
+            return true
         end
 
         function Slider:SetDisabled(Disabled: boolean)
@@ -8513,6 +8775,7 @@ do
 
             Bar.Active = not Slider.Disabled
             Slider:UpdateColors()
+            Library:UpdateDependencyBoxes()
         end
 
         function Slider:SetVisible(Visible: boolean)
@@ -8645,39 +8908,31 @@ do
                 return
             end
 
+            local ScrollStates = {}
             if Library.ActiveTab then
                 for _, Side in Library.ActiveTab.Sides do
+                    ScrollStates[Side] = Side.ScrollingEnabled
                     Side.ScrollingEnabled = false
                 end
             end
-
             if Library.ActiveLoading and Library.ActiveLoading.Sidebar then
-                Library.ActiveLoading.Sidebar.Container.ScrollingEnabled = false
+                local LoadingScroll = Library.ActiveLoading.Sidebar.Container
+                ScrollStates[LoadingScroll] = LoadingScroll.ScrollingEnabled
+                LoadingScroll.ScrollingEnabled = false
             end
 
-            while IsDragInput(Input) and not Slider.Destroyed do
-                local Location = Mouse.X
-                local Scale = math.clamp((Location - Bar.AbsolutePosition.X) / Bar.AbsoluteSize.X, 0, 1)
-
+            while IsDragInput(Input) and not Slider.Destroyed and not Library.Unloaded do
+                local Location = GetCurrentPointerPosition(Input).X
+                local Scale = math.clamp((Location - Bar.AbsolutePosition.X) / math.max(Bar.AbsoluteSize.X, 1), 0, 1)
                 local OldValue = Slider.Value
-                Slider.Value = Round(Slider.Min + ((Slider.Max - Slider.Min) * Scale), Slider.Rounding)
-
+                Slider.Value = math.clamp(Round(Slider.Min + ((Slider.Max - Slider.Min) * Scale), Slider.Rounding), Slider.Min, Slider.Max)
                 Slider:Display()
-                if Slider.Value ~= OldValue then
-                    Slider:RunChanged()
-                end
-
+                if Slider.Value ~= OldValue then Slider:RunChanged() end
                 RunService.RenderStepped:Wait()
             end
 
-            if Library.ActiveTab then
-                for _, Side in Library.ActiveTab.Sides do
-                    Side.ScrollingEnabled = true
-                end
-            end
-
-            if Library.ActiveLoading and Library.ActiveLoading.Sidebar then
-                Library.ActiveLoading.Sidebar.Container.ScrollingEnabled = true
+            for Scroll, State in ScrollStates do
+                if Scroll and Scroll.Parent then Scroll.ScrollingEnabled = State end
             end
         end))
 
@@ -8698,6 +8953,7 @@ do
         Options[Idx] = Slider
 
         function Slider:Destroy()
+            if Slider.Destroyed then return end
             Slider.Destroyed = true
 
             if Slider.Connections then
@@ -8728,6 +8984,7 @@ do
 
     function Funcs:AddDropdown(Idx, Info)
         if self.Destroyed then return nil end
+        AssertIndexAvailable(Options, Idx, "Option")
 
         Info = Library:Validate(Info, Templates.Dropdown)
 
@@ -8755,6 +9012,7 @@ do
 
             Multi = Info.Multi,
             DragSelect = Info.Multi and not Library.IsMobile and Info.DragSelect == true,
+            KeepDisabledValuePosition = Info.KeepDisabledValuePosition == true,
 
             SpecialType = Info.SpecialType,
             ExcludeLocalPlayer = Info.ExcludeLocalPlayer,
@@ -9140,11 +9398,17 @@ do
             end
 
             table.clear(FilteredEntries)
-            for _, Entry in EnabledList do
-                table.insert(FilteredEntries, Entry)
-            end
-            for _, Entry in DisabledList do
-                table.insert(FilteredEntries, Entry)
+            if Dropdown.KeepDisabledValuePosition and not IsSearching then
+                for _, Entry in Pending do
+                    table.insert(FilteredEntries, Entry)
+                end
+            else
+                for _, Entry in EnabledList do
+                    table.insert(FilteredEntries, Entry)
+                end
+                for _, Entry in DisabledList do
+                    table.insert(FilteredEntries, Entry)
+                end
             end
         end
 
@@ -9481,7 +9745,7 @@ do
                 if DragInputEndedConn then DragInputEndedConn:Disconnect() end
                 if DragInputChangedConn then DragInputChangedConn:Disconnect() end
 
-                DragInputChangedConn = Library:GiveSignal(UserInputService.InputChanged:Connect(function(ChangeInput)
+                DragInputChangedConn = UserInputService.InputChanged:Connect(function(ChangeInput)
                     if not IsMovementInput(ChangeInput) and ChangeInput ~= StartInput then
                         return
                     end
@@ -9493,9 +9757,9 @@ do
                             break
                         end
                     end
-                end))
+                end)
 
-                DragInputEndedConn = Library:GiveSignal(UserInputService.InputEnded:Connect(function(EndInput)
+                DragInputEndedConn = UserInputService.InputEnded:Connect(function(EndInput)
                     if EndInput ~= StartInput and not (IsMouseInput(EndInput) and EndInput.UserInputType == StartInput.UserInputType) then
                         return
                     end
@@ -9505,10 +9769,8 @@ do
                     Dropdown:RunChanged()
 
                     StopDragSelect()
-                end))
+                end)
 
-                table.insert(Dropdown.Connections, DragInputEndedConn)
-                table.insert(Dropdown.Connections, DragInputChangedConn)
             end))
 
             return Row
@@ -9585,6 +9847,7 @@ do
         end
 
         function Dropdown:SetValues(Values)
+            assert(typeof(Values) == "table", "Values must be a table.")
             Dropdown.Values = Values
 
             local Changed = false
@@ -9619,6 +9882,11 @@ do
             end
 
             local IsDictionary = not IsSequentialArray(Dropdown.Values)
+            if #Dropdown.Values == 0 and typeof(Values) == "table" then
+                IsDictionary = not IsSequentialArray(Values)
+            elseif #Dropdown.Values == 0 and typeof(Values) == "string" then
+                IsDictionary = false
+            end
             if IsDictionary then
                 if typeof(Values) == "string" then
                     Dropdown.Values[Values] = Values
@@ -9647,7 +9915,8 @@ do
         end
 
         function Dropdown:SetDisabledValues(DisabledValues)
-            Dropdown.DisabledValues = DisabledValues
+            assert(typeof(DisabledValues) == "table", "DisabledValues must be a table.")
+            Dropdown.DisabledValues = table.clone(DisabledValues)
             Dropdown:BuildDropdownList()
         end
 
@@ -9805,12 +10074,13 @@ do
         Dropdown.Holder = Holder
         table.insert(Groupbox.Elements, Dropdown)
 
-        Dropdown.Default = Defaults
-        Dropdown.DefaultValues = Dropdown.Values
+        Dropdown.Default = table.clone(Defaults)
+        Dropdown.DefaultValues = table.clone(Dropdown.Values)
 
         Options[Idx] = Dropdown
 
         function Dropdown:Destroy()
+            if Dropdown.Destroyed then return end
             Dropdown.Destroyed = true
 
             StopDragSelect()
@@ -9847,6 +10117,7 @@ do
 
     function Funcs:AddViewport(Idx, Info)
         if self.Destroyed then return nil end
+        AssertIndexAvailable(Options, Idx, "Option")
 
         Info = Library:Validate(Info, Templates.Viewport)
 
@@ -9857,14 +10128,19 @@ do
         local LastMousePos, LastPinchDist = nil, 0
 
         local ViewportObject = Info.Object
+        if ViewportObject and (typeof(ViewportObject) ~= "Instance" or (not ViewportObject:IsA("BasePart") and not ViewportObject:IsA("Model"))) then
+            error("Viewport Object must be a BasePart or Model.")
+        end
+
+        local OwnsObject = false
         if Info.Clone and typeof(Info.Object) == "Instance" then
-            if Info.Object.Archivable then
-                ViewportObject = ViewportObject:Clone()
-            else
-                Info.Object.Archivable = true
-                ViewportObject = ViewportObject:Clone()
-                Info.Object.Archivable = false
-            end
+            local OriginalArchivable = Info.Object.Archivable
+            Info.Object.Archivable = true
+            local CloneResult = Info.Object:Clone()
+            Info.Object.Archivable = OriginalArchivable
+            assert(CloneResult, "Failed to clone viewport object.")
+            ViewportObject = CloneResult
+            OwnsObject = true
         end
 
         local Viewport = {
@@ -9872,7 +10148,9 @@ do
             Destroyed = false,
 
             Object = ViewportObject :: PVInstance,
+            OwnsObject = OwnsObject,
             Camera = if not Info.Camera then Instance.new("Camera") else Info.Camera,
+            OwnsCamera = Info.Camera == nil,
             Interactive = Info.Interactive,
             AutoFocus = Info.AutoFocus,
             Visible = Info.Visible,
@@ -9939,24 +10217,26 @@ do
             Active = Viewport.Interactive,
         })
 
-        table.insert(Viewport.Connections, ViewportFrame.MouseEnter:Connect(function()
-            if not Viewport.Interactive then
-                return
-            end
-
+        local ScrollStates = {}
+        local function SetViewportScrolling(Enabled)
             for _, Side in Groupbox.Tab.Sides do
-                Side.ScrollingEnabled = false
+                if ScrollStates[Side] == nil then ScrollStates[Side] = Side.ScrollingEnabled end
+                Side.ScrollingEnabled = Enabled
             end
+        end
+        local function RestoreViewportScrolling()
+            for Side, State in ScrollStates do
+                if Side and Side.Parent then Side.ScrollingEnabled = State end
+                ScrollStates[Side] = nil
+            end
+        end
+
+        table.insert(Viewport.Connections, ViewportFrame.MouseEnter:Connect(function()
+            if Viewport.Interactive then SetViewportScrolling(false) end
         end))
 
         table.insert(Viewport.Connections, ViewportFrame.MouseLeave:Connect(function()
-            if not Viewport.Interactive then
-                return
-            end
-
-            for _, Side in Groupbox.Tab.Sides do
-                Side.ScrollingEnabled = true
-            end
+            if Viewport.Interactive and not Dragging and not Pinching then RestoreViewportScrolling() end
         end))
 
         table.insert(Viewport.Connections, ViewportFrame.InputBegan:Connect(function(input)
@@ -10031,13 +10311,15 @@ do
                 return
             end
 
-            if not Viewport.Interactive or not Library:MouseIsOverFrame(ViewportFrame, touchPositions[1]) then
+            if not Viewport.Interactive or typeof(touchPositions) ~= "table" or not touchPositions[1] or not touchPositions[2] then
                 return
             end
+            if not Library:MouseIsOverFrame(ViewportFrame, touchPositions[1]) then return end
 
             if state == Enum.UserInputState.Begin then
                 Pinching = true
                 Dragging = false
+                SetViewportScrolling(false)
                 LastPinchDist = (touchPositions[1] - touchPositions[2]).Magnitude
             elseif state == Enum.UserInputState.Change then
                 local currentDist = (touchPositions[1] - touchPositions[2]).Magnitude
@@ -10046,6 +10328,7 @@ do
                 Viewport.Camera.CFrame += Viewport.Camera.CFrame.LookVector * delta
             elseif state == Enum.UserInputState.End or state == Enum.UserInputState.Cancel then
                 Pinching = false
+                if not Dragging then RestoreViewportScrolling() end
             end
         end))
 
@@ -10055,24 +10338,41 @@ do
         end
 
         function Viewport:SetObject(Object: Instance, Clone: boolean?)
-            assert(Object, "Object cannot be nil.")
+            assert(typeof(Object) == "Instance" and (Object:IsA("BasePart") or Object:IsA("Model")), "Viewport object must be a BasePart or Model.")
 
+            local NewObject = Object
+            local NewOwnsObject = false
             if Clone then
-                Object = Object:Clone()
+                local OriginalArchivable = Object.Archivable
+                Object.Archivable = true
+                local CloneOk, CloneResult = pcall(Object.Clone, Object)
+                Object.Archivable = OriginalArchivable
+                if not CloneOk then
+                    error(CloneResult, 2)
+                end
+                assert(CloneResult, "Failed to clone viewport object.")
+                NewObject = CloneResult
+                NewOwnsObject = true
             end
 
-            if Viewport.Object then
-                Viewport.Object:Destroy()
+            if Viewport.Object and Viewport.Object ~= NewObject then
+                if Viewport.OwnsObject then
+                    Viewport.Object:Destroy()
+                else
+                    Viewport.Object.Parent = nil
+                end
             end
 
-            Viewport.Object = Object
+            Viewport.Object = NewObject
+            Viewport.OwnsObject = NewOwnsObject
             ;(Viewport.Object :: PVInstance).Parent = ViewportFrame
-
+            if Viewport.AutoFocus then FocusCamera() end
             Groupbox:Resize()
         end
 
         function Viewport:SetHeight(Height: number)
-            assert(Height > 0, "Height must be greater than 0.")
+            assert(typeof(Height) == "number" and Height == Height and Height ~= math.huge and Height ~= -math.huge and Height > 0, "Height must be a finite number greater than 0.")
+            Viewport.Height = Height
 
             Holder.Size = UDim2.new(1, 0, 0, Height)
             Groupbox:Resize()
@@ -10087,12 +10387,12 @@ do
         end
 
         function Viewport:SetCamera(Camera: Instance)
-            assert(
-                Camera and typeof(Camera) == "Instance" and Camera:IsA("Camera"),
-                "Camera must be a valid Camera instance."
-            )
-
+            assert(typeof(Camera) == "Instance" and Camera:IsA("Camera"), "Camera must be a valid Camera instance.")
+            if Viewport.Camera and Viewport.OwnsCamera and Viewport.Camera ~= Camera then
+                Viewport.Camera:Destroy()
+            end
             Viewport.Camera = Camera
+            Viewport.OwnsCamera = false
             ViewportFrame.CurrentCamera = Camera
         end
 
@@ -10116,12 +10416,28 @@ do
         Options[Idx] = Viewport
 
         function Viewport:Destroy()
+            if Viewport.Destroyed then return end
             Viewport.Destroyed = true
+            Dragging = false
+            Pinching = false
+            RestoreViewportScrolling()
 
             if Viewport.Connections then
                 for _, Connection in Viewport.Connections do
-                    Connection:Disconnect()
+                    if Connection and Connection.Connected then Connection:Disconnect() end
                 end
+                table.clear(Viewport.Connections)
+            end
+
+            if Viewport.Object then
+                if Viewport.OwnsObject then
+                    Viewport.Object:Destroy()
+                elseif Viewport.Object.Parent == ViewportFrame then
+                    Viewport.Object.Parent = nil
+                end
+            end
+            if Viewport.Camera and Viewport.OwnsCamera then
+                Viewport.Camera:Destroy()
             end
 
             if Holder then
@@ -10142,6 +10458,7 @@ do
 
     function Funcs:AddImage(Idx, Info)
         if self.Destroyed then return nil end
+        AssertIndexAvailable(Options, Idx, "Option")
 
         Info = Library:Validate(Info, Templates.Image)
 
@@ -10210,7 +10527,7 @@ do
         local ImageLabel = New("ImageLabel", ImageProperties)
 
         function Image:SetHeight(Height: number)
-            assert(Height > 0, "Height must be greater than 0.")
+            assert(typeof(Height) == "number" and Height == Height and Height ~= math.huge and Height ~= -math.huge and Height > 0, "Height must be a finite number greater than 0.")
 
             Image.Height = Height
             Holder.Size = UDim2.new(1, 0, 0, Height)
@@ -10253,7 +10570,7 @@ do
 
         function Image:SetScaleType(ScaleType: Enum.ScaleType)
             assert(
-                typeof(ScaleType) == "EnumItem" and ScaleType:IsA("ScaleType"),
+                typeof(ScaleType) == "EnumItem" and ScaleType.EnumType == Enum.ScaleType,
                 "ScaleType must be a valid Enum.ScaleType."
             )
 
@@ -10284,6 +10601,7 @@ do
         Options[Idx] = Image
 
         function Image:Destroy()
+            if Image.Destroyed then return end
             Image.Destroyed = true
 
             if Holder then
@@ -10304,6 +10622,7 @@ do
 
     function Funcs:AddVideo(Idx, Info)
         if self.Destroyed then return nil end
+        AssertIndexAvailable(Options, Idx, "Option")
 
         Info = Library:Validate(Info, Templates.Video)
 
@@ -10361,7 +10680,7 @@ do
         VideoFrameInstance.Playing = Video.Playing
 
         function Video:SetHeight(Height: number)
-            assert(Height > 0, "Height must be greater than 0.")
+            assert(typeof(Height) == "number" and Height == Height and Height ~= math.huge and Height ~= -math.huge and Height > 0, "Height must be a finite number greater than 0.")
 
             Video.Height = Height
             Holder.Size = UDim2.new(1, 0, 0, Height)
@@ -10422,6 +10741,7 @@ do
         Options[Idx] = Video
 
         function Video:Destroy()
+            if Video.Destroyed then return end
             Video.Destroyed = true
 
             if Video.Connections then
@@ -10448,6 +10768,7 @@ do
 
     function Funcs:AddUIPassthrough(Idx, Info)
         if self.Destroyed then return nil end
+        AssertIndexAvailable(Options, Idx, "Option")
 
         Info = Library:Validate(Info, Templates.UIPassthrough)
 
@@ -10484,7 +10805,7 @@ do
         Groupbox:Resize()
 
         function Passthrough:SetHeight(Height: number)
-            assert(typeof(Height) == "number" and Height > 0, "Height must be a number greater than 0.")
+            assert(typeof(Height) == "number" and Height == Height and Height ~= math.huge and Height ~= -math.huge and Height > 0, "Height must be a finite number greater than 0.")
 
             Passthrough.Height = Height
             Holder.Size = UDim2.new(1, 0, 0, Height)
@@ -10519,6 +10840,7 @@ do
         Options[Idx] = Passthrough
 
         function Passthrough:Destroy()
+            if Passthrough.Destroyed then return end
             Passthrough.Destroyed = true
 
             if Passthrough.Connections then
@@ -10527,6 +10849,9 @@ do
                 end
             end
 
+            if Passthrough.Instance and Passthrough.Instance.Parent == Holder then
+                Passthrough.Instance.Parent = nil
+            end
             if Holder then
                 Holder:Destroy()
             end
@@ -10665,17 +10990,21 @@ do
                 end
             end
 
-            for _, Element in Depbox.Elements do
-                if Element.Destroy then
+            for Index = #Depbox.Elements, 1, -1 do
+                local Element = Depbox.Elements[Index]
+                if Element and Element.Destroy then
                     Element:Destroy()
                 end
             end
+            table.clear(Depbox.Elements)
 
-            for _, SubDepbox in Depbox.DependencyBoxes do
-                if SubDepbox.Destroy then
+            for Index = #Depbox.DependencyBoxes, 1, -1 do
+                local SubDepbox = Depbox.DependencyBoxes[Index]
+                if SubDepbox and SubDepbox.Destroy then
                     SubDepbox:Destroy()
                 end
             end
+            table.clear(Depbox.DependencyBoxes)
 
             if DepboxContainer then
                 DepboxContainer:Destroy()
@@ -10820,17 +11149,21 @@ do
                 end
             end
 
-            for _, Element in DepGroupbox.Elements do
-                if Element.Destroy then
+            for Index = #DepGroupbox.Elements, 1, -1 do
+                local Element = DepGroupbox.Elements[Index]
+                if Element and Element.Destroy then
                     Element:Destroy()
                 end
             end
+            table.clear(DepGroupbox.Elements)
 
-            for _, SubDepbox in DepGroupbox.DependencyBoxes do
-                if SubDepbox.Destroy then
+            for Index = #DepGroupbox.DependencyBoxes, 1, -1 do
+                local SubDepbox = DepGroupbox.DependencyBoxes[Index]
+                if SubDepbox and SubDepbox.Destroy then
                     SubDepbox:Destroy()
                 end
             end
+            table.clear(DepGroupbox.DependencyBoxes)
 
             if DepGroupboxContainer then
                 DepGroupboxContainer:Destroy()
@@ -10856,9 +11189,35 @@ do
     end
 end
 
-function Library:SetFont(_)
-    Library.Scheme.Font = Font.fromEnum(Enum.Font.SourceSansBold)
+function Library:SetFont(FontValue)
+    if typeof(FontValue) == "EnumItem" then
+        assert(FontValue.EnumType == Enum.Font, "FontValue must be an Enum.Font item.")
+        FontValue = Font.fromEnum(FontValue)
+    end
+
+    assert(typeof(FontValue) == "Font", "FontValue must be a Font or Enum.Font value.")
+    Library.Scheme.Font = FontValue
     Library:UpdateColorsUsingRegistry()
+end
+
+function Library:SetCustomCursor(Enabled: boolean)
+    assert(typeof(Enabled) == "boolean", "Enabled must be a boolean.")
+    Library.ShowCustomCursor = Enabled
+
+    if Library.IsMobile then
+        return
+    end
+
+    UserInputService.MouseIconEnabled = not Library.ShowCustomCursor
+    if Cursor then
+        Cursor.Visible = Library.Toggled and Library.ShowCustomCursor
+    end
+end
+
+function Library:SetKeybindListVisibility(Visible: boolean)
+    if Library.KeybindFrame then
+        Library.KeybindFrame.Visible = Visible == true
+    end
 end
 
 function Library:SetBackgroundImage(Image: string | number)
@@ -10934,11 +11293,9 @@ function Library:UpdateNotificationPositions(Snap: boolean?)
 end
 
 function Library:SetNotifySide(Side: string)
-    Side = tostring(Side or "Right")
+    assert(typeof(Side) == "string", "Notification side must be a string.")
     local LowerSide = Side:lower()
-    if LowerSide ~= "left" and LowerSide ~= "right" and LowerSide ~= "bottom" then
-        LowerSide = "right"
-    end
+    assert(LowerSide == "left" or LowerSide == "right" or LowerSide == "bottom", "Notification side must be Left, Right, or Bottom.")
 
     Library.NotifySide = LowerSide == "bottom" and "Bottom" or (LowerSide == "left" and "Left" or "Right")
 
@@ -10971,13 +11328,13 @@ function Library:Notify(...)
     local Info = select(1, ...)
 
     if typeof(Info) == "table" then
-        Data.Title = tostring(Info.Title)
+        Data.Title = Info.Title ~= nil and tostring(Info.Title) or ""
         Data.TitleColor = Info.TitleColor
 
-        Data.Description = tostring(Info.Description)
+        Data.Description = Info.Description ~= nil and tostring(Info.Description) or ""
         Data.DescriptionColor = Info.DescriptionColor
 
-        Data.Time = Info.Time or 5
+        Data.Time = Info.Time == nil and 5 or Info.Time
         Data.SoundId = Info.SoundId
         Data.Steps = Info.Steps
         Data.Persist = Info.Persist
@@ -10989,12 +11346,22 @@ function Library:Notify(...)
         Data.BigIcon = Info.BigIcon
         Data.IconColor = Info.IconColor
 
-        Data.Volume = tonumber(Info.Volume) or 3
+        local SoundVolume = Info.Volume == nil and 3 or tonumber(Info.Volume)
+        assert(SoundVolume and SoundVolume >= 0, "Notification volume must be a non-negative number.")
+        Data.Volume = SoundVolume
     else
-        Data.Description = tostring(Info)
-        Data.Time = select(2, ...) or 5
+        Data.Description = tostring(Info or "")
+        Data.Time = select(2, ...) == nil and 5 or select(2, ...)
         Data.SoundId = select(3, ...)
-        Data.Volume = select(4, ...) or 3
+        local SoundVolume = select(4, ...) == nil and 3 or tonumber(select(4, ...))
+        assert(SoundVolume and SoundVolume >= 0, "Notification volume must be a non-negative number.")
+        Data.Volume = SoundVolume
+    end
+
+    if typeof(Data.Time) == "number" then
+        assert(Data.Time >= 0, "Notification time cannot be negative.")
+    elseif typeof(Data.Time) ~= "Instance" then
+        error("Notification time must be a number or Instance.")
     end
     Data.Destroyed = false
 
@@ -11037,7 +11404,9 @@ function Library:Notify(...)
             Parent = Holder,
         })
     )
-    Library:AddOutline(Holder)
+    local NotificationOutline, NotificationShadow = Library:AddOutline(Holder)
+    NotificationOutline.Transparency = 1
+    NotificationShadow.Transparency = 0.94
 
     local ContentHolder = New("Frame", {
         AutomaticSize = Enum.AutomaticSize.Y,
@@ -11130,7 +11499,7 @@ function Library:Notify(...)
     })
 
     local TitleContainer
-    if Data.Title then
+    if Data.Title ~= "" then
         TitleContainer = New("Frame", {
             BackgroundTransparency = 1,
             Size = UDim2.fromOffset(0, 0),
@@ -11161,7 +11530,7 @@ function Library:Notify(...)
 
     local TimerFill
 
-    if Data.Title then
+    if Data.Title ~= "" then
         Title = New("TextLabel", {
             AutomaticSize = Enum.AutomaticSize.None,
             BackgroundTransparency = 1,
@@ -11178,7 +11547,7 @@ function Library:Notify(...)
         })
     end
 
-    if Data.Description then
+    if Data.Description ~= "" then
         Desc = New("TextLabel", {
             AutomaticSize = Enum.AutomaticSize.None,
             BackgroundTransparency = 1,
@@ -11235,24 +11604,81 @@ function Library:Notify(...)
     end
 
     function Data:ChangeTitle(Text)
-        if Title then
-            Data.Title = tostring(Text)
-            Title.Text = Data.Title
-            Data:Resize()
+        Data.Title = tostring(Text or "")
+
+        if Data.Title == "" then
+            if Title then
+                Title:Destroy()
+                Title = nil
+            end
+            if TitleContainer then
+                TitleContainer:Destroy()
+                TitleContainer = nil
+            end
+            TitleX = 0
+        else
+            if not TitleContainer then
+                TitleContainer = New("Frame", {
+                    BackgroundTransparency = 1,
+                    Size = UDim2.fromOffset(0, 0),
+                    Parent = TextContainer,
+                })
+            end
+
+            if not Title then
+                Title = New("TextLabel", {
+                    AutomaticSize = Enum.AutomaticSize.None,
+                    BackgroundTransparency = 1,
+                    Position = UDim2.fromScale(0, 0.5),
+                    AnchorPoint = Vector2.new(0, 0.5),
+                    Size = UDim2.fromScale(0, 0),
+                    Text = Data.Title,
+                    TextColor3 = Data.TitleColor or "FontColor",
+                    TextSize = 15,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    TextYAlignment = Enum.TextYAlignment.Center,
+                    TextWrapped = true,
+                    Parent = TitleContainer,
+                })
+            else
+                Title.Text = Data.Title
+            end
         end
+
+        Data:Resize()
     end
 
     function Data:ChangeDescription(Text)
-        if Desc then
-            Data.Description = tostring(Text)
+        Data.Description = tostring(Text or "")
+
+        if Data.Description == "" then
+            if Desc then
+                Desc:Destroy()
+                Desc = nil
+            end
+            DescX = 0
+        elseif not Desc then
+            Desc = New("TextLabel", {
+                AutomaticSize = Enum.AutomaticSize.None,
+                BackgroundTransparency = 1,
+                Size = UDim2.fromScale(0, 0),
+                Text = Data.Description,
+                TextColor3 = Data.DescriptionColor or "FontColor",
+                TextSize = 14,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextWrapped = true,
+                Parent = TextContainer,
+            })
+        else
             Desc.Text = Data.Description
-            Data:Resize()
         end
+
+        Data:Resize()
     end
 
     function Data:ChangeStep(NewStep)
-        if TimerFill and Data.Steps then
-            NewStep = math.clamp(NewStep or 0, 0, Data.Steps)
+        if TimerFill and typeof(Data.Steps) == "number" and Data.Steps > 0 then
+            NewStep = math.clamp(tonumber(NewStep) or 0, 0, Data.Steps)
             TimerFill.Size = UDim2.fromScale(NewStep / Data.Steps, 1)
         end
     end
@@ -11267,8 +11693,8 @@ function Library:Notify(...)
 
         Library:SafeCallback(Data.Callback, Reason)
 
-        if typeof(Data.Time) == "Instance" then
-            pcall(Data.Time.Destroy, Data.Time)
+        if typeof(Data.Time) == "Instance" and Data.Time.Parent then
+            Data.Time:Destroy()
         end
 
         if DeleteConnection then
@@ -11420,11 +11846,11 @@ function Library:CreateWindow(WindowInfo)
     if typeof(WindowInfo.Font) == "EnumItem" then
         WindowInfo.Font = Font.fromEnum(WindowInfo.Font :: any)
     end
-    WindowInfo.CornerRadius = math.min(WindowInfo.CornerRadius, 3)
+    WindowInfo.CornerRadius = math.clamp(WindowInfo.CornerRadius, 0, 10)
 
     local TabButtonsStyle = WindowInfo.TabButtonsStyle
-    WindowInfo.EnableSidebarResize = false
-    WindowInfo.EnableCompactingSnap = false
+    WindowInfo.EnableSidebarResize = WindowInfo.EnableSidebarResize == true
+    WindowInfo.EnableCompactingSnap = WindowInfo.DisableCompactingSnap ~= true
 
     --// Old Naming \\--
     if WindowInfo.Compact ~= nil then
@@ -11441,10 +11867,10 @@ function Library:CreateWindow(WindowInfo)
     WindowInfo.SnapMargin = math.max(0, WindowInfo.SnapMargin)
 
     Library.CornerRadius = WindowInfo.CornerRadius
-    WindowInfo.NotifySide = "Right"
-    Library:SetNotifySide("Right")
+    WindowInfo.NotifySide = tostring(WindowInfo.NotifySide or "Right")
+    Library:SetNotifySide(WindowInfo.NotifySide)
     Library.ShowCustomCursor = WindowInfo.ShowCustomCursor
-    Library.Scheme.Font = Font.fromEnum(Enum.Font.SourceSansBold)
+    Library.Scheme.Font = WindowInfo.Font
     Library.ToggleKeybind = WindowInfo.ToggleKeybind
     Library.GlobalSearch = WindowInfo.GlobalSearch
 
@@ -11472,6 +11898,10 @@ function Library:CreateWindow(WindowInfo)
     local CurrentTabDescription
     local ResizeButton
     local Tabs
+    local SidebarHeader
+    local SidebarHeaderTitle
+    local SidebarHeaderMeta
+    local SidebarStatusDot
     local Container
     local BackgroundImage
     local HasBackgroundImage = false
@@ -11485,10 +11915,9 @@ function Library:CreateWindow(WindowInfo)
         AvoidCoreGui = WindowInfo.SnapAvoidCoreGui,
     }
 
-    -- Aurora-style layout: no left navigation rail. Tabs live in a full-width row below the centered title.
-    local InitialLeftWidth = 0
+    local InitialLeftWidth = 168
     local IsCompact = false
-    local LastExpandedWidth = 0
+    local LastExpandedWidth = InitialLeftWidth
 
     do
         Library.KeybindFrame, Library.KeybindContainer = Library:AddDraggableMenu("Keybinds")
@@ -11522,7 +11951,7 @@ function Library:CreateWindow(WindowInfo)
         )
         Library:AddOutline(MainFrame)
         Library:MakeLine(MainFrame, {
-            Position = UDim2.fromOffset(0, 44),
+            Position = UDim2.fromOffset(0, 50),
             Size = UDim2.new(1, 0, 0, 1),
         })
 
@@ -11588,10 +12017,21 @@ function Library:CreateWindow(WindowInfo)
         --// Top Bar \\-
         TopBar = New("Frame", {
             BackgroundColor3 = "MainColor",
-            BackgroundTransparency = 0.45,
-            Size = UDim2.new(1, 0, 0, 44),
+            BackgroundTransparency = 0.05,
+            Size = UDim2.new(1, 0, 0, 50),
             Parent = MainFrame,
         })
+
+        -- Quiet structural detail instead of an internal outline: a thin highlight rail
+        -- anchors the header and gives the window a deliberate top edge.
+        New("Frame", {
+            BackgroundColor3 = "AccentColor",
+            BackgroundTransparency = 0.78,
+            Position = UDim2.fromOffset(10, 0),
+            Size = UDim2.new(1, -20, 0, 1),
+            Parent = TopBar,
+        })
+
         Library:MakeDraggable(MainFrame, TopBar, false, true, WindowSnapConfig)
 
         --// Title \\--
@@ -11599,7 +12039,7 @@ function Library:CreateWindow(WindowInfo)
             AnchorPoint = Vector2.new(0, 0),
             BackgroundTransparency = 1,
             Position = UDim2.fromOffset(0, 0),
-            Size = UDim2.new(0, 360, 1, 0),
+            Size = UDim2.new(0, 460, 1, 0),
             Parent = TopBar,
         })
         New("UIListLayout", {
@@ -11610,47 +12050,129 @@ function Library:CreateWindow(WindowInfo)
             Parent = TitleHolder,
         })
         New("UIPadding", {
-            PaddingLeft = UDim.new(0, 12),
+            PaddingLeft = UDim.new(0, 14),
+            PaddingRight = UDim.new(0, 8),
             Parent = TitleHolder,
         })
+
+        local TitleIconShell = New("Frame", {
+            BackgroundColor3 = "SearchColor",
+            Size = UDim2.fromOffset(28, 28),
+            Parent = TitleHolder,
+        })
+        table.insert(Library.Corners, New("UICorner", {
+            CornerRadius = UDim.new(0, 5),
+            Parent = TitleIconShell,
+        }))
 
         if WindowInfo.Icon then
             local Icon = Library:GetCustomIcon(WindowInfo.Icon)
             WindowIcon = New("ImageLabel", {
-                Size = UDim2.fromOffset(24, 24),
-                Parent = TitleHolder,
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                BackgroundTransparency = 1,
+                ImageColor3 = "WhiteColor",
+                ImageTransparency = 0.06,
+                Position = UDim2.fromScale(0.5, 0.5),
+                Size = UDim2.fromOffset(17, 17),
+                Parent = TitleIconShell,
             })
             if Icon then
                 Library:ApplyLucideIcon(WindowIcon, Icon)
             end
         else
             WindowIcon = New("TextLabel", {
+                AnchorPoint = Vector2.new(0.5, 0.5),
                 BackgroundTransparency = 1,
-                Size = WindowInfo.IconSize,
+                Position = UDim2.fromScale(0.5, 0.5),
+                Size = UDim2.fromScale(0.8, 0.8),
                 Text = WindowInfo.Title:sub(1, 1),
+                TextColor3 = "WhiteColor",
                 TextScaled = true,
-                Visible = false,
-                Parent = TitleHolder,
+                Parent = TitleIconShell,
             })
         end
+
+        local TitleTextStack = New("Frame", {
+            AutomaticSize = Enum.AutomaticSize.XY,
+            BackgroundTransparency = 1,
+            Size = UDim2.fromOffset(0, 0),
+            Parent = TitleHolder,
+        })
+        New("UIListLayout", {
+            FillDirection = Enum.FillDirection.Vertical,
+            HorizontalAlignment = Enum.HorizontalAlignment.Left,
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+            Padding = UDim.new(0, 1),
+            Parent = TitleTextStack,
+        })
 
         WindowTitle = New("TextLabel", {
             AutomaticSize = Enum.AutomaticSize.X,
             BackgroundTransparency = 1,
-            Size = UDim2.fromOffset(0, 1),
+            Size = UDim2.fromOffset(0, 16),
             Text = WindowInfo.Title,
-            TextColor3 = "FontColor",
+            TextColor3 = "WhiteColor",
             TextSize = 15,
             TextXAlignment = Enum.TextXAlignment.Left,
+            Parent = TitleTextStack,
+        })
+
+        local WindowSubtitle = New("TextLabel", {
+            AutomaticSize = Enum.AutomaticSize.X,
+            BackgroundTransparency = 1,
+            Size = UDim2.fromOffset(0, 12),
+            Text = WindowInfo.Subtitle,
+            TextColor3 = "FontColor",
+            TextSize = 10,
+            TextTransparency = 0.22,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Parent = TitleTextStack,
+        })
+
+        local HeaderStatus = New("Frame", {
+            AutomaticSize = Enum.AutomaticSize.X,
+            BackgroundColor3 = "SearchColor",
+            BackgroundTransparency = 0.15,
+            Size = UDim2.fromOffset(0, 20),
             Parent = TitleHolder,
+        })
+        table.insert(Library.Corners, New("UICorner", {
+            CornerRadius = UDim.new(0, 10),
+            Parent = HeaderStatus,
+        }))
+        New("UIPadding", {
+            PaddingLeft = UDim.new(0, 8),
+            PaddingRight = UDim.new(0, 8),
+            Parent = HeaderStatus,
+        })
+        New("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+            Padding = UDim.new(0, 6),
+            Parent = HeaderStatus,
+        })
+        New("Frame", {
+            BackgroundColor3 = "WhiteColor",
+            Size = UDim2.fromOffset(5, 5),
+            Parent = HeaderStatus,
+        })
+        New("UICorner", { CornerRadius = UDim.new(1, 0), Parent = HeaderStatus:GetChildren()[#HeaderStatus:GetChildren()] })
+        New("TextLabel", {
+            AutomaticSize = Enum.AutomaticSize.X,
+            BackgroundTransparency = 1,
+            Size = UDim2.fromOffset(0, 12),
+            Text = "READY",
+            TextColor3 = "FontColor",
+            TextSize = 9,
+            Parent = HeaderStatus,
         })
 
         --// Top Right Bar \\--
         RightWrapper = New("Frame", {
             AnchorPoint = Vector2.new(1, 0.5),
             BackgroundTransparency = 1,
-            Position = UDim2.new(1, -8, 0.5, 0),
-            Size = UDim2.fromOffset(190, 28),
+            Position = UDim2.new(1, -14, 0.5, 0),
+            Size = UDim2.fromOffset(300, 30),
             Parent = TopBar,
         })
 
@@ -11662,16 +12184,14 @@ function Library:CreateWindow(WindowInfo)
             Parent = RightWrapper,
         })
 
+        -- The tab title/description used to occupy the header beside Search.
+        -- Keep the objects for API/lifecycle compatibility, but make them a
+        -- zero-footprint hidden metadata container so the header stays clean.
         CurrentTabInfo = New("Frame", {
-            Size = UDim2.fromScale(WindowInfo.DisableSearch and 1 or 0.5, 1),
+            Size = UDim2.fromOffset(0, 0),
             Visible = false,
             BackgroundTransparency = 1,
             Parent = RightWrapper,
-        })
-
-        New("UIFlexItem", {
-            FlexMode = Enum.UIFlexMode.Grow,
-            Parent = CurrentTabInfo,
         })
 
         New("UIListLayout", {
@@ -11693,8 +12213,9 @@ function Library:CreateWindow(WindowInfo)
             BackgroundTransparency = 1,
             Size = UDim2.fromScale(1, 0),
             AutomaticSize = Enum.AutomaticSize.Y,
-            Text = "",
-            TextSize = 13,
+            Text = WindowInfo.Title,
+            TextColor3 = "WhiteColor",
+            TextSize = 12,
             TextXAlignment = Enum.TextXAlignment.Left,
             Parent = CurrentTabInfo,
         })
@@ -11713,17 +12234,22 @@ function Library:CreateWindow(WindowInfo)
 
         SearchHolder = New("Frame", {
             BackgroundColor3 = "SearchColor",
-            Size = UDim2.new(WindowInfo.SearchbarSize.X.Scale, WindowInfo.SearchbarSize.X.Offset, 0, WindowInfo.SearchbarHeight or 28),
+            Size = UDim2.new(
+                WindowInfo.SearchbarSize.X.Scale,
+                WindowInfo.SearchbarSize.X.Offset,
+                WindowInfo.SearchbarSize.Y.Scale,
+                if WindowInfo.SearchbarSize.Y.Scale == 0 then (WindowInfo.SearchbarHeight or 30) else WindowInfo.SearchbarSize.Y.Offset
+            ),
             Visible = not (WindowInfo.DisableSearch or false),
             Parent = RightWrapper,
         })
         table.insert(Library.Corners, New("UICorner", {
-            CornerRadius = UDim.new(0, math.min(WindowInfo.SearchbarCornerRadius or 3, 3)),
+            CornerRadius = UDim.new(0, math.min(WindowInfo.SearchbarCornerRadius or 5, 5)),
             Parent = SearchHolder,
         }))
         local SearchBoxStroke = New("UIStroke", {
             Color = "OutlineColor",
-            Transparency = 0.18,
+            Transparency = 1,
             Thickness = 1,
             Parent = SearchHolder,
         })
@@ -11772,17 +12298,11 @@ function Library:CreateWindow(WindowInfo)
         end
 
         Library:GiveSignal(SearchBox.Focused:Connect(function()
-            Library.Registry[SearchBoxStroke].Color = "AccentColor"
-            TweenService:Create(SearchBoxStroke, Library.TweenInfo, {
-                Color = Library.Scheme.AccentColor,
-            }):Play()
+            SearchHolder.BackgroundColor3 = Library:GetBetterColor(Library.Scheme.SearchColor, 3)
         end))
 
         Library:GiveSignal(SearchBox.FocusLost:Connect(function()
-            Library.Registry[SearchBoxStroke].Color = "OutlineColor"
-            TweenService:Create(SearchBoxStroke, Library.TweenInfo, {
-                Color = Library.Scheme.OutlineColor,
-            }):Play()
+            SearchHolder.BackgroundColor3 = Library.Scheme.SearchColor
         end))
 
         --// Bottom Bar \\--
@@ -11845,65 +12365,112 @@ function Library:CreateWindow(WindowInfo)
             end)
         end
 
-        local WindowResizeIcon = New("ImageLabel", {
-            ImageColor3 = "FontColor",
-            ImageTransparency = 0.6,
-            Position = UDim2.fromOffset(3, 3),
-            Size = UDim2.new(1, -4, 1, -4),
-            Parent = ResizeButton,
-        })
-        if ResizeIcon then
-            Library:ApplyLucideIcon(WindowResizeIcon, ResizeIcon)
+        if ResizeButton then
+            local WindowResizeIcon = New("ImageLabel", {
+                BackgroundTransparency = 1,
+                ImageColor3 = "FontColor",
+                ImageTransparency = 0.6,
+                Position = UDim2.fromOffset(3, 3),
+                Size = UDim2.new(1, -4, 1, -4),
+                Parent = ResizeButton,
+            })
+            if ResizeIcon then
+                Library:ApplyLucideIcon(WindowResizeIcon, ResizeIcon)
+            end
         end
 
-        --// Tabs \\--
+        --// Sidebar navigation \\--
         Tabs = New("ScrollingFrame", {
-            AutomaticCanvasSize = Enum.AutomaticSize.X,
+            AutomaticCanvasSize = Enum.AutomaticSize.Y,
             BackgroundColor3 = "BackgroundColor",
             CanvasSize = UDim2.fromScale(0, 0),
-            Position = UDim2.fromOffset(0, 45),
+            Position = UDim2.fromOffset(0, 54),
             ScrollBarThickness = 0,
-            ScrollingDirection = Enum.ScrollingDirection.X,
-            Size = UDim2.new(1, 0, 0, 38),
+            ScrollingDirection = Enum.ScrollingDirection.Y,
+            Size = UDim2.new(0, InitialLeftWidth, 1, -76),
             Parent = MainFrame,
         })
         New("UIListLayout", {
-            FillDirection = Enum.FillDirection.Horizontal,
-            HorizontalAlignment = Enum.HorizontalAlignment.Center,
-            VerticalAlignment = Enum.VerticalAlignment.Center,
-            Padding = UDim.new(0, TabButtonsStyle.Gap or 4),
+            FillDirection = Enum.FillDirection.Vertical,
+            HorizontalAlignment = Enum.HorizontalAlignment.Left,
+            VerticalAlignment = Enum.VerticalAlignment.Top,
+            Padding = UDim.new(0, TabButtonsStyle.Gap or 5),
             SortOrder = Enum.SortOrder.LayoutOrder,
             Parent = Tabs,
         })
         New("UIPadding", {
-            PaddingBottom = UDim.new(0, 0),
-            PaddingLeft = UDim.new(0, 6),
-            PaddingRight = UDim.new(0, 6),
-            PaddingTop = UDim.new(0, 0),
+            PaddingBottom = UDim.new(0, 12),
+            PaddingLeft = UDim.new(0, 11),
+            PaddingRight = UDim.new(0, 11),
+            PaddingTop = UDim.new(0, 12),
             Parent = Tabs,
         })
-        Library:MakeLine(MainFrame, {
-            Position = UDim2.fromOffset(0, 83),
-            Size = UDim2.new(1, 0, 0, 1),
+
+        SidebarHeader = New("Frame", {
+            BackgroundTransparency = 1,
+            LayoutOrder = -1000,
+            Size = UDim2.new(1, 0, 0, 56),
+            Parent = Tabs,
+        })
+        New("UIListLayout", {
+            FillDirection = Enum.FillDirection.Vertical,
+            HorizontalAlignment = Enum.HorizontalAlignment.Left,
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+            Padding = UDim.new(0, 2),
+            Parent = SidebarHeader,
+        })
+        New("UIPadding", {
+            PaddingLeft = UDim.new(0, 8),
+            PaddingTop = UDim.new(0, 2),
+            PaddingBottom = UDim.new(0, 3),
+            Parent = SidebarHeader,
+        })
+        SidebarHeaderTitle = New("TextLabel", {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, 17),
+            Text = "aspect.sys",
+            TextColor3 = "WhiteColor",
+            TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Parent = SidebarHeader,
+        })
+        SidebarHeaderMeta = New("TextLabel", {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, 14),
+            Text = "your true potential.",
+            TextColor3 = "FontColor",
+            TextSize = 9,
+            TextTransparency = 0.3,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Parent = SidebarHeader,
+        })
+        local SidebarRule = Library:MakeLine(SidebarHeader, {
+            AnchorPoint = Vector2.new(0, 1),
+            Position = UDim2.new(0, 8, 1, 0),
+            Size = UDim2.new(1, -16, 0, 1),
+        })
+        SidebarRule.BackgroundTransparency = 0.55
+        DividerLine = Library:MakeLine(MainFrame, {
+            Position = UDim2.fromOffset(InitialLeftWidth, 50),
+            Size = UDim2.new(0, 1, 1, -76),
         })
 
         --// Container \\--
         Container = New("Frame", {
-            AnchorPoint = Vector2.new(1, 0),
             BackgroundColor3 = function()
-                return Library:GetBetterColor(Library.Scheme.BackgroundColor, 1)
+                return Library:GetBetterColor(Library.Scheme.BackgroundColor, 2)
             end,
             ClipsDescendants = true,
             Name = "Container",
-            Position = UDim2.new(1, 0, 0, 85),
-            Size = UDim2.new(1, 0, 1, -106),
+            Position = UDim2.fromOffset(InitialLeftWidth + 1, 50),
+            Size = UDim2.new(1, -(InitialLeftWidth + 1), 1, -72),
             Parent = MainFrame,
         })
         New("UIPadding", {
             PaddingBottom = UDim.new(0, 5),
-            PaddingLeft = UDim.new(0, 10),
-            PaddingRight = UDim.new(0, 10),
-            PaddingTop = UDim.new(0, 8),
+            PaddingLeft = UDim.new(0, 12),
+            PaddingRight = UDim.new(0, 12),
+            PaddingTop = UDim.new(0, 10),
             Parent = Container,
         })
 
@@ -11912,6 +12479,10 @@ function Library:CreateWindow(WindowInfo)
 
     --// Window Table \\--
     local Window = {}
+    Window.Info = WindowInfo
+    Window.AlwaysOnTop = WindowInfo.AlwaysOnTop == true
+    Window.Size = MainFrame.Size
+    Window.Position = MainFrame.Position
     local Fading = false
 
     local function SetUICorner(UICorner, Corner, HalfValue)
@@ -11930,59 +12501,24 @@ function Library:CreateWindow(WindowInfo)
         WindowInfo.Title = title
     end
 
-    function Window:SetBackgroundImage(Image: string)
-        local ValidIcon = false
+    function Window:SetBackgroundImage(Image: string | number)
+        assert(typeof(Image) == "string" or typeof(Image) == "number", "Background image must be a string or number.")
 
-        if typeof(Image) == "string" then
-            local BackgroundIcon = Library:GetCustomIcon(Image)
-
-            if BackgroundIcon then
-                ValidIcon = true
-
-                Library:ApplyLucideIcon(BackgroundImage, BackgroundIcon)
-            elseif Image:match("http://") or Image:match("https://") then
-                local RawFileName = Image:match("(.+)%..+$")
-                local _, Domain = Image:match("^(https?://)([^/]+)");
-
-                if RawFileName and Domain then
-                    local Extention = string.sub(Image, #RawFileName + 1, #Image)
-                    local FileNamePos = RawFileName:gsub("\\", "/"):find("/[^/]*$")
-                    local FileName = FileNamePos and Image:sub(FileNamePos + 1) or nil
-
-                    if FileName then
-                        ValidIcon = true
-
-                        local AssetName = Domain .. FileName
-                        if #AssetName > 255 then
-                            local NewLength = 255 - #Domain - #Extention
-                            if NewLength < 0 then
-                                AssetName = Domain .. Extention
-                            else
-                                AssetName = Domain .. string.sub(FileName:sub(1, #FileName - #Extention), 1, NewLength) .. Extention
-                            end
-                        end
-
-                        if CustomImageManagerAssets[FileName] == nil then
-                            CustomImageManager.AddAsset(FileName, 0, Image)
-                        else
-                            CustomImageManager.DownloadAsset(FileName, true)
-                        end
-
-                        BackgroundImage.Image = CustomImageManager.GetAsset(FileName)
-                        BackgroundImage.ImageRectOffset = Vector2.zero
-                        BackgroundImage.ImageRectSize = Vector2.zero
-                    end
-                end
-            end
+        if typeof(Image) == "number" then
+            Image = string.format("rbxassetid://%s", tostring(Image))
         end
 
-        if not ValidIcon then
+        if Image == "" then
             BackgroundImage.Image = ""
             BackgroundImage.ImageRectOffset = Vector2.zero
             BackgroundImage.ImageRectSize = Vector2.zero
+            HasBackgroundImage = false
+        else
+            local BackgroundIcon, IconError = Library:GetCustomIcon(Image)
+            assert(BackgroundIcon, "Invalid background image/icon: " .. tostring(IconError or Image))
+            Library:ApplyLucideIcon(BackgroundImage, BackgroundIcon)
+            HasBackgroundImage = true
         end
-
-        HasBackgroundImage = ValidIcon
         WindowInfo.BackgroundImage = Image
     end
 
@@ -11994,33 +12530,39 @@ function Library:CreateWindow(WindowInfo)
     end
 
     function Window:SetAlwaysOnTop(Enabled: boolean)
-        WindowInfo.AlwaysOnTop = Enabled == true
+        assert(typeof(Enabled) == "boolean", "Enabled must be a boolean.")
+        WindowInfo.AlwaysOnTop = Enabled
+        Window.AlwaysOnTop = WindowInfo.AlwaysOnTop
         SetAlwaysOnTop(Library.ScreenGui, WindowInfo.AlwaysOnTop)
     end
 
     function Window:SetSnapping(Enabled: boolean, Distance: number?, Margin: number?, AvoidCoreGui: boolean?)
-        WindowInfo.Snapping = Enabled == true
-        WindowSnapConfig.Enabled = WindowInfo.Snapping
+        assert(typeof(Enabled) == "boolean", "Enabled must be a boolean.")
+        WindowInfo.Snapping = Enabled
+        WindowSnapConfig.Enabled = Enabled
 
-        if Distance then
+        if Distance ~= nil then
+            assert(typeof(Distance) == "number" and Distance == Distance and Distance ~= math.huge and Distance ~= -math.huge, "Distance must be a finite number.")
             WindowInfo.SnapDistance = math.max(0, Distance)
             WindowSnapConfig.Distance = WindowInfo.SnapDistance
         end
 
-        if Margin then
+        if Margin ~= nil then
+            assert(typeof(Margin) == "number" and Margin == Margin and Margin ~= math.huge and Margin ~= -math.huge, "Margin must be a finite number.")
             WindowInfo.SnapMargin = math.max(0, Margin)
             WindowSnapConfig.Margin = WindowInfo.SnapMargin
         end
 
         if AvoidCoreGui ~= nil then
-            WindowInfo.SnapAvoidCoreGui = AvoidCoreGui == true
-            WindowSnapConfig.AvoidCoreGui = WindowInfo.SnapAvoidCoreGui
+            assert(typeof(AvoidCoreGui) == "boolean", "AvoidCoreGui must be a boolean.")
+            WindowInfo.SnapAvoidCoreGui = AvoidCoreGui
+            WindowSnapConfig.AvoidCoreGui = AvoidCoreGui
         end
     end
 
     function Window:SetCornerRadius(Radius: number)
-        assert(typeof(Radius) == "number", "Expected number for Radius got: " .. typeof(Radius))
-        Radius = math.min(Radius, 20)
+        assert(typeof(Radius) == "number" and Radius == Radius and Radius ~= math.huge and Radius ~= -math.huge, "Radius must be a finite number.")
+        Radius = math.clamp(Radius, 0, 20)
 
         local RadiusHalf = UDim.new(0, Radius / 2)
         local RadiusUDim = UDim.new(0, Radius)
@@ -12052,8 +12594,12 @@ function Library:CreateWindow(WindowInfo)
         Library.CornerRadius = Radius
         WindowInfo.CornerRadius = Radius
 
-        ResizeButton.Position = UDim2.new(1, -Radius / 4, 0, 0)
-        BottomBackground.Size = UDim2.new(1, 0, 0, 20 + Radius)
+        if ResizeButton then
+            ResizeButton.Position = UDim2.new(1, -Radius / 4, 0, 0)
+        end
+        if BottomBackground then
+            BottomBackground.Size = UDim2.new(1, 0, 0, 20 + Radius)
+        end
 
         for _, Menu in Library.ContextMenus do
             if Menu.Destroyed then
@@ -12106,14 +12652,20 @@ function Library:CreateWindow(WindowInfo)
     end
 
     function Window:SetAnimations(Animations: { [string]: boolean }?, TabTransitionTime: number?, TabSwipeOffset: number?, TabSwipeFrom: ("left" | "right" | "top" | "bottom" | string)?)
-        if typeof(Animations) == "table" then
-            WindowInfo.Animations = Animations
-            Library.Animations = Animations
+        if Animations ~= nil then
+            assert(typeof(Animations) == "table", "Animations must be a table.")
+            local NormalizedAnimations = {}
+            for Key, Value in Animations do
+                NormalizedAnimations[Key] = Value == true
+            end
+            WindowInfo.Animations = NormalizedAnimations
+            Library.Animations = NormalizedAnimations
         end
 
         if typeof(TabTransitionTime) == "number" then
+            assert(TabTransitionTime == TabTransitionTime and TabTransitionTime ~= math.huge and TabTransitionTime ~= -math.huge, "TabTransitionTime must be a finite number.")
             local TweenInfo = TweenInfo.new(
-                math.max(0, TabTransitionTime or 0.22),
+                math.max(0, TabTransitionTime),
                 Enum.EasingStyle.Quad,
                 Enum.EasingDirection.Out
             )
@@ -12123,23 +12675,55 @@ function Library:CreateWindow(WindowInfo)
         end
 
         if typeof(TabSwipeOffset) == "number" then
+            assert(TabSwipeOffset == TabSwipeOffset and TabSwipeOffset ~= math.huge and TabSwipeOffset ~= -math.huge, "TabSwipeOffset must be a finite number.")
             TabSwipeOffset = math.max(1, TabSwipeOffset)
 
             WindowInfo.TabSwipeOffset = TabSwipeOffset
             Library.TabSwipeOffset = TabSwipeOffset
         end
 
-        if typeof(TabSwipeFrom) == "string" then
+        if TabSwipeFrom ~= nil then
+            assert(typeof(TabSwipeFrom) == "string", "TabSwipeFrom must be a string.")
             TabSwipeFrom = string.lower(TabSwipeFrom)
-
+            if TabSwipeFrom ~= "left" and TabSwipeFrom ~= "right" and TabSwipeFrom ~= "top" and TabSwipeFrom ~= "bottom" then
+                error("Invalid TabSwipeFrom value: " .. tostring(TabSwipeFrom))
+            end
             WindowInfo.TabSwipeFrom = TabSwipeFrom
             Library.TabSwipeFrom = TabSwipeFrom
         end
     end
 
+    local function ApplySidebarGeometry(Width)
+        Width = math.clamp(Width, WindowInfo.MinSidebarWidth, math.max(WindowInfo.MinSidebarWidth, MainFrame.AbsoluteSize.X - 300))
+        InitialLeftWidth = Width
+
+        Tabs.Size = UDim2.new(0, Width, 1, -76)
+        DividerLine.Position = UDim2.fromOffset(Width, 50)
+
+        Container.Position = UDim2.fromOffset(Width + 1, 50)
+        Container.Size = UDim2.new(1, -(Width + 1), 1, -72)
+    end
+
     local function ApplyCompact()
-        -- Top navigation intentionally has no compact/sidebar state.
-        IsCompact = false
+        local Target = IsCompact and math.max(48, WindowInfo.SidebarCompactWidth) or math.max(WindowInfo.MinSidebarWidth, LastExpandedWidth)
+        ApplySidebarGeometry(Target)
+
+        if SidebarHeaderTitle then
+            SidebarHeaderTitle.Visible = not IsCompact
+        end
+        if SidebarHeaderMeta then
+            SidebarHeaderMeta.Visible = not IsCompact
+        end
+
+        for _, Entry in Library.TabButtons do
+            if Entry and Entry.Label then
+                Entry.Label.Visible = not IsCompact
+            end
+            if Entry and Entry.Padding then
+                Entry.Padding.PaddingLeft = UDim.new(0, IsCompact and 6 or (TabButtonsStyle.Padding or 9))
+                Entry.Padding.PaddingRight = UDim.new(0, IsCompact and 6 or (TabButtonsStyle.Padding or 9))
+            end
+        end
     end
 
     function Window:IsSidebarCompacted()
@@ -12147,18 +12731,34 @@ function Library:CreateWindow(WindowInfo)
     end
 
     function Window:SetCompact(State)
-        -- Legacy sidebar API retained for compatibility; top navigation does not compact.
-        IsCompact = false
+        State = State == true
+        if State == IsCompact then
+            ApplyCompact()
+            return
+        end
+
+        if not State then
+            LastExpandedWidth = math.max(LastExpandedWidth, WindowInfo.MinSidebarWidth)
+        else
+            LastExpandedWidth = math.max(InitialLeftWidth, WindowInfo.MinSidebarWidth)
+        end
+
+        IsCompact = State
+        ApplyCompact()
     end
 
     function Window:GetSidebarWidth()
-        return MainFrame.Size.X.Offset
+        return InitialLeftWidth
     end
 
     function Window:SetSidebarWidth(Width)
-        -- Legacy sidebar API retained for compatibility; geometry is intentionally fixed to Aurora-style top tabs.
+        assert(typeof(Width) == "number" and Width == Width and Width ~= math.huge and Width ~= -math.huge, "Width must be a finite number.")
+        local MaxWidth = math.max(WindowInfo.MinSidebarWidth, MainFrame.AbsoluteSize.X - 300)
+        Width = math.clamp(Width, WindowInfo.MinSidebarWidth, MaxWidth)
         IsCompact = false
-        LastExpandedWidth = MainFrame.Size.X.Offset
+        LastExpandedWidth = Width
+        ApplySidebarGeometry(Width)
+        ApplyCompact()
     end
 
     function Window:ShowTabInfo(Name, Description)
@@ -12210,21 +12810,18 @@ function Library:CreateWindow(WindowInfo)
 
         Icon = Library:GetCustomIcon(Icon)
         do
-            local TabTextWidth = Library:GetTextBounds(Name, WindowInfo.Font, 13)
-            local TabHorizontalPadding = IsCompact and 6 or (TabButtonsStyle.Padding or 6)
-            local TabContentWidth = math.ceil(TabTextWidth) + (Icon and 14 or 0) + (Icon and 6 or 0) + (TabHorizontalPadding * 2)
-            local TabButtonWidth = math.max(74, TabContentWidth)
+            local TabHorizontalPadding = TabButtonsStyle.Padding or 9
 
             TabButton = New("TextButton", {
                 BackgroundColor3 = "MainColor",
                 BackgroundTransparency = 1,
-                Size = UDim2.new(0, TabButtonWidth, 1, 0),
+                Size = UDim2.new(1, 0, 0, 39),
                 Text = "",
                 LayoutOrder = Order,
                 Parent = Tabs,
             })
             New("UICorner", {
-                CornerRadius = UDim.new(0, 2),
+                CornerRadius = UDim.new(0, math.min(TabButtonsStyle.CornerRadius or 5, WindowInfo.CornerRadius)),
                 Parent = TabButton,
             })
             TabStroke = New("UIStroke", {
@@ -12235,11 +12832,11 @@ function Library:CreateWindow(WindowInfo)
             })
             if TabButtonsStyle.Indicator then
                 TabIndicator = New("Frame", {
-                    AnchorPoint = Vector2.new(0.5, 1),
+                    AnchorPoint = Vector2.new(0, 0.5),
                     BackgroundColor3 = "AccentColor",
                     BackgroundTransparency = 1,
-                    Position = UDim2.new(0.5, 0, 1, -1),
-                    Size = UDim2.new(0, 30, 0, 2),
+                    Position = UDim2.new(0, 0, 0.5, 0),
+                    Size = UDim2.new(0, TabButtonsStyle.IndicatorWidth or 2, 0, TabButtonsStyle.IndicatorHeight or 20),
                     Parent = TabButton,
                 })
 
@@ -12263,7 +12860,7 @@ function Library:CreateWindow(WindowInfo)
             })
             New("UIListLayout", {
                 FillDirection = Enum.FillDirection.Horizontal,
-                HorizontalAlignment = Enum.HorizontalAlignment.Center,
+                HorizontalAlignment = Enum.HorizontalAlignment.Left,
                 VerticalAlignment = Enum.VerticalAlignment.Center,
                 Padding = UDim.new(0, 6),
                 SortOrder = Enum.SortOrder.LayoutOrder,
@@ -12273,11 +12870,11 @@ function Library:CreateWindow(WindowInfo)
             if Icon then
                 TabIcon = New("ImageLabel", {
                     BackgroundTransparency = 1,
-                    ImageColor3 = Icon.Custom and "WhiteColor" or "AccentColor",
-                    ImageTransparency = 0.5,
+                    ImageColor3 = "FontColor",
+                    ImageTransparency = 0.35,
                     LayoutOrder = 1,
                     ScaleType = Enum.ScaleType.Fit,
-                    Size = UDim2.fromOffset(14, 14),
+                    Size = UDim2.fromOffset(16, 16),
                     Visible = true,
                     Parent = ButtonHolder,
                 })
@@ -12290,7 +12887,7 @@ function Library:CreateWindow(WindowInfo)
                 Size = UDim2.new(0, 0, 1, 0),
                 Text = Name,
                 TextSize = 13,
-                TextTransparency = 0.5,
+                TextTransparency = 0.38,
                 TextTruncate = Enum.TextTruncate.AtEnd,
                 TextXAlignment = Enum.TextXAlignment.Left,
                 Visible = not IsCompact,
@@ -12299,6 +12896,7 @@ function Library:CreateWindow(WindowInfo)
             })
 
             table.insert(Library.TabButtons, {
+                Button = TabButton,
                 Label = TabLabel,
                 Padding = ButtonPadding,
                 Icon = TabIcon,
@@ -12635,6 +13233,7 @@ function Library:CreateWindow(WindowInfo)
         --// The compact card is a groupbox element (Groupbox:AddPlayerInfo).
         function Tab:AddPlayerInfo(Idx, Info)
             if Tab.Destroyed then return nil end
+            AssertIndexAvailable(Options, Idx, "Option")
 
             Info = Library:Validate(Info, Templates.PlayerInfo)
 
@@ -12650,6 +13249,7 @@ function Library:CreateWindow(WindowInfo)
             end
 
             function PlayerInfo:Destroy()
+                if PlayerInfo.Destroyed then return end
                 PlayerInfo.Destroyed = true
 
                 for _, Connection in PlayerInfo.Connections do
@@ -12751,12 +13351,29 @@ function Library:CreateWindow(WindowInfo)
                 Holder = TabboxHolder,
                 Tabs = {},
 
+                Parent = ParentObj,
                 ParentBox = if ParentObj.Type == "Groupbox" then ParentObj else nil,
             }
 
             function Tabbox:UpdateCorners()
+                local FirstIndex = math.huge
+                local LastIndex = -math.huge
+
                 for _, Tab in Tabbox.Tabs do
-                    Tab:UpdateCorners()
+                    if Tab and not Tab.Destroyed then
+                        local Index = tonumber(Tab.TabIndex) or math.huge
+                        FirstIndex = math.min(FirstIndex, Index)
+                        LastIndex = math.max(LastIndex, Index)
+                    end
+                end
+
+                FirstTab = FirstIndex == math.huge and nil or FirstIndex
+                LastTab = LastIndex == -math.huge and nil or LastIndex
+
+                for _, Tab in Tabbox.Tabs do
+                    if Tab and not Tab.Destroyed then
+                        Tab:UpdateCorners()
+                    end
                 end
             end
 
@@ -12866,6 +13483,7 @@ function Library:CreateWindow(WindowInfo)
 
                 local Tab = {
                     Name = Name,
+                    TabIndex = TabIndex,
 
                     Connections = {},
                     Destroyed = false,
@@ -12943,23 +13561,43 @@ function Library:CreateWindow(WindowInfo)
                 end
 
                 function Tab:Destroy()
+                    if Tab.Destroyed then return end
                     Tab.Destroyed = true
 
                     if Tab.Connections then
                         for _, Connection in Tab.Connections do
-                            Connection:Disconnect()
+                            if Connection and Connection.Connected then
+                                Connection:Disconnect()
+                            end
                         end
+                        table.clear(Tab.Connections)
                     end
 
-                    for _, Element in Tab.Elements do
-                        if Element.Destroy then
+                    for Index = #Tab.Elements, 1, -1 do
+                        local Element = Tab.Elements[Index]
+                        if Element and Element.Destroy then
                             Element:Destroy()
                         end
                     end
+                    table.clear(Tab.Elements)
 
-                    for _, SubDepbox in Tab.DependencyBoxes do
-                        if SubDepbox.Destroy then
+                    for Index = #Tab.DependencyBoxes, 1, -1 do
+                        local SubDepbox = Tab.DependencyBoxes[Index]
+                        if SubDepbox and SubDepbox.Destroy then
                             SubDepbox:Destroy()
+                        end
+                    end
+                    table.clear(Tab.DependencyBoxes)
+
+                    local WasActive = Tabbox.ActiveTab == Tab
+                    if WasActive then
+                        Tabbox.ActiveTab = nil
+                    end
+
+                    for Key, Candidate in pairs(Tabbox.Tabs) do
+                        if Candidate == Tab then
+                            Tabbox.Tabs[Key] = nil
+                            break
                         end
                     end
 
@@ -12970,6 +13608,17 @@ function Library:CreateWindow(WindowInfo)
                     if Button then
                         Button:Destroy()
                     end
+
+                    if WasActive then
+                        for _, Candidate in pairs(Tabbox.Tabs) do
+                            if Candidate and not Candidate.Destroyed and Candidate.Show then
+                                Candidate:Show()
+                                break
+                            end
+                        end
+                    end
+
+                    Tabbox:UpdateCorners()
                 end
 
                 --// Execution \\--
@@ -12977,7 +13626,7 @@ function Library:CreateWindow(WindowInfo)
                     Tab:Show()
                 end
 
-                Button.MouseButton1Click:Connect(Tab.Show)
+                table.insert(Tab.Connections, Button.MouseButton1Click:Connect(Tab.Show))
 
                 setmetatable(Tab, BaseGroupbox)
 
@@ -13006,6 +13655,8 @@ function Library:CreateWindow(WindowInfo)
             })
 
             function Tabbox:Destroy()
+                if Tabbox.Destroyed then return end
+
                 if Tabbox.PoppedOut then
                     Tabbox:SetPoppedOut(false)
                 end
@@ -13018,11 +13669,13 @@ function Library:CreateWindow(WindowInfo)
                     end
                 end
 
-                for _, Tab in Tabbox.Tabs do
-                    if Tab.Destroy then
+                for Index = #Tabbox.Tabs, 1, -1 do
+                    local Tab = Tabbox.Tabs[Index]
+                    if Tab and Tab.Destroy then
                         Tab:Destroy()
                     end
                 end
+                table.clear(Tabbox.Tabs)
 
                 if TabboxHolder then
                     TabboxHolder:Destroy()
@@ -13030,6 +13683,32 @@ function Library:CreateWindow(WindowInfo)
 
                 if BoxHolder then
                     BoxHolder:Destroy()
+                end
+
+                local OwnerTabs = Tabbox.Parent and Tabbox.Parent.Tabboxes
+                if OwnerTabs then
+                    for Key, Candidate in OwnerTabs do
+                        if Candidate == Tabbox then
+                            if typeof(Key) == "number" then
+                                table.remove(OwnerTabs, Key)
+                            else
+                                OwnerTabs[Key] = nil
+                            end
+                            break
+                        end
+                    end
+                end
+            end
+
+            if not ParentObj.Tabboxes then
+                ParentObj.Tabboxes = {}
+            end
+
+            if ParentObj ~= Tab then
+                if Info.Name then
+                    ParentObj.Tabboxes[Info.Name] = Tabbox
+                else
+                    table.insert(ParentObj.Tabboxes, Tabbox)
                 end
             end
 
@@ -13103,7 +13782,7 @@ function Library:CreateWindow(WindowInfo)
                 table.insert(
                     Library.Corners,
                     New("UICorner", {
-                        CornerRadius = UDim.new(0, math.min(WindowInfo.CornerRadius, 4)),
+                        CornerRadius = UDim.new(0, math.min(WindowInfo.CornerRadius, 8)),
                         Parent = GroupboxHolder,
                     })
                 )
@@ -13111,14 +13790,23 @@ function Library:CreateWindow(WindowInfo)
                     Parent = GroupboxHolder,
                 })
                 local GroupboxOutline, GroupboxShadow = Library:AddOutline(GroupboxHolder)
-                GroupboxOutline.Transparency = 0.62
-                GroupboxShadow.Transparency = 0.92
+                GroupboxOutline.Transparency = 1
+                GroupboxShadow.Transparency = 0.95
 
                 GroupboxTop = New("Frame", {
                     AutomaticSize = Enum.AutomaticSize.Y,
                     BackgroundTransparency = 1,
                     Size = UDim2.fromScale(1, 0),
                     Parent = GroupboxHolder,
+                })
+
+                        local GroupboxAccent = New("Frame", {
+                    AnchorPoint = Vector2.new(0, 0.5),
+                    BackgroundColor3 = "AccentColor",
+                    BackgroundTransparency = 0.18,
+                    Position = UDim2.new(0, 0, 0.5, 0),
+                    Size = UDim2.new(0, 2, 0, 22),
+                    Parent = GroupboxTop,
                 })
                 New("UIPadding", {
                     PaddingBottom = UDim.new(0, 7),
@@ -13205,6 +13893,7 @@ function Library:CreateWindow(WindowInfo)
                     LayoutOrder = 1,
                     Size = UDim2.new(1, 0, 0, 1),
                 })
+                GroupboxLine.BackgroundTransparency = 1
 
                 GroupboxContainer = New("ScrollingFrame", {
                     AutomaticCanvasSize = Enum.AutomaticSize.Y,
@@ -13222,10 +13911,10 @@ function Library:CreateWindow(WindowInfo)
                     Parent = GroupboxContainer,
                 })
                 New("UIPadding", {
-                    PaddingBottom = UDim.new(0, 8),
-                    PaddingLeft = UDim.new(0, 9),
-                    PaddingRight = UDim.new(0, 9),
-                    PaddingTop = UDim.new(0, 8),
+                    PaddingBottom = UDim.new(0, 10),
+                    PaddingLeft = UDim.new(0, 10),
+                    PaddingRight = UDim.new(0, 10),
+                    PaddingTop = UDim.new(0, 9),
                     Parent = GroupboxContainer,
                 })
             end
@@ -13248,7 +13937,8 @@ function Library:CreateWindow(WindowInfo)
 
                 Tab = Tab,
                 DependencyBoxes = {},
-                Elements = {}
+                Elements = {},
+                Tabboxes = {},
             }
 
             local ResizeTween
@@ -13364,6 +14054,7 @@ function Library:CreateWindow(WindowInfo)
             })
 
             function Groupbox:Destroy()
+                if Groupbox.Destroyed then return end
                 if Groupbox.PoppedOut then
                     Groupbox:SetPoppedOut(false)
                 end
@@ -13386,15 +14077,25 @@ function Library:CreateWindow(WindowInfo)
                     end
                 end
 
-                for _, Element in Groupbox.Elements do
-                    if Element.Destroy then
+                for Index = #Groupbox.Elements, 1, -1 do
+                    local Element = Groupbox.Elements[Index]
+                    if Element and Element.Destroy then
                         Element:Destroy()
                     end
                 end
                 table.clear(Groupbox.Elements)
 
-                for _, SubDepbox in Groupbox.DependencyBoxes do
-                    if SubDepbox.Destroy then
+                for Index = #Groupbox.Tabboxes, 1, -1 do
+                    local Tabbox = Groupbox.Tabboxes[Index]
+                    if Tabbox and Tabbox.Destroy then
+                        Tabbox:Destroy()
+                    end
+                end
+                table.clear(Groupbox.Tabboxes)
+
+                for Index = #Groupbox.DependencyBoxes, 1, -1 do
+                    local SubDepbox = Groupbox.DependencyBoxes[Index]
+                    if SubDepbox and SubDepbox.Destroy then
                         SubDepbox:Destroy()
                     end
                 end
@@ -13428,9 +14129,11 @@ function Library:CreateWindow(WindowInfo)
             end
 
             if Info.DisableCollapsing ~= true then
-                GroupboxCollapseArrow.MouseButton1Click:Connect(function()
-                    Groupbox:ToggleCollapsed()
-                end)
+                table.insert(Groupbox.Connections, GroupboxCollapseArrow.MouseButton1Click:Connect(function()
+                    if not Groupbox.Destroyed then
+                        Groupbox:ToggleCollapsed()
+                    end
+                end))
             end
 
             Groupbox.AddTabbox = AddTabbox
@@ -13466,10 +14169,10 @@ function Library:CreateWindow(WindowInfo)
             end
 
             TweenService:Create(TabButton, Library.TweenInfo, {
-                BackgroundTransparency = Hovering and 0.84 or 1,
+                BackgroundTransparency = Hovering and 0.86 or 1,
             }):Play()
             TweenService:Create(TabStroke, Library.TweenInfo, {
-                Transparency = Hovering and 0.78 or 1,
+                Transparency = 1,
             }):Play()
             TweenService:Create(TabLabel, Library.TweenInfo, {
                 TextTransparency = Hovering and 0.12 or 0.42,
@@ -13491,10 +14194,10 @@ function Library:CreateWindow(WindowInfo)
             end
 
             TweenService:Create(TabButton, Library.TweenInfo, {
-                BackgroundTransparency = 0.72,
+                BackgroundTransparency = 0.84,
             }):Play()
             TweenService:Create(TabStroke, Library.TweenInfo, {
-                Transparency = 0.55,
+                Transparency = 1,
             }):Play()
             if TabIndicator then
                 TweenService:Create(TabIndicator, Library.TweenInfo, {
@@ -13586,6 +14289,11 @@ function Library:CreateWindow(WindowInfo)
         end
 
         function Tab:Destroy()
+            if Tab.Destroyed then return end
+            local WasActive = Library.ActiveTab == Tab
+            if WasActive then
+                Library.ActiveTab = nil
+            end
             Tab.Destroyed = true
 
             if Tab.Connections then
@@ -13606,28 +14314,30 @@ function Library:CreateWindow(WindowInfo)
             end
             table.clear(Tab.Groupboxes)
 
-            for _, Tabbox in Tab.Tabboxes do
-                if Tabbox.Destroy then
+            for Index = #Tab.Tabboxes, 1, -1 do
+                local Tabbox = Tab.Tabboxes[Index]
+                if Tabbox and Tabbox.Destroy then
                     Tabbox:Destroy()
                 end
             end
             table.clear(Tab.Tabboxes)
 
-            for _, DepGroupbox in Tab.DependencyGroupboxes do
-                if DepGroupbox.Destroy then
+            for Index = #Tab.DependencyGroupboxes, 1, -1 do
+                local DepGroupbox = Tab.DependencyGroupboxes[Index]
+                if DepGroupbox and DepGroupbox.Destroy then
                     DepGroupbox:Destroy()
                 end
             end
+            table.clear(Tab.DependencyGroupboxes)
 
-            for _, PlayerInfo in PlayerBanners do
-                if PlayerInfo and not PlayerInfo.Destroyed then
-                    PlayerInfo.Destroyed = true
-                    for _, Connection in PlayerInfo.Connections or {} do
-                        Connection:Disconnect()
-                    end
+            for Index = #PlayerBanners, 1, -1 do
+                local PlayerInfo = PlayerBanners[Index]
+                if PlayerInfo and PlayerInfo.Destroy then
+                    PlayerInfo:Destroy()
+                else
+                    table.remove(PlayerBanners, Index)
                 end
             end
-            table.clear(PlayerBanners)
 
             if TabContainer then
                 TabContainer:Destroy()
@@ -13645,6 +14355,15 @@ function Library:CreateWindow(WindowInfo)
             end
 
             Library.Tabs[Name] = nil
+
+            if WasActive then
+                for _, Candidate in Library.Tabs do
+                    if Candidate and not Candidate.Destroyed and Candidate.Button and Candidate.Button.Visible then
+                        Candidate:Show()
+                        break
+                    end
+                end
+            end
         end
 
         --// Execution \\--
@@ -13656,13 +14375,13 @@ function Library:CreateWindow(WindowInfo)
             Tab:Show()
         end
 
-        TabButton.MouseEnter:Connect(function()
-            Tab:Hover(true)
-        end)
-        TabButton.MouseLeave:Connect(function()
-            Tab:Hover(false)
-        end)
-        TabButton.MouseButton1Click:Connect(Tab.Show)
+        table.insert(Tab.Connections, TabButton.MouseEnter:Connect(function()
+            if not Tab.Destroyed then Tab:Hover(true) end
+        end))
+        table.insert(Tab.Connections, TabButton.MouseLeave:Connect(function()
+            if not Tab.Destroyed then Tab:Hover(false) end
+        end))
+        table.insert(Tab.Connections, TabButton.MouseButton1Click:Connect(Tab.Show))
 
         Library.Tabs[Name] = Tab
 
@@ -13706,15 +14425,12 @@ function Library:CreateWindow(WindowInfo)
 
         Icon = if Icon == "key" then KeyIcon else Library:GetCustomIcon(Icon)
         do
-            local TabTextWidth = Library:GetTextBounds(Name, WindowInfo.Font, 13)
-            local TabHorizontalPadding = IsCompact and 6 or (TabButtonsStyle.Padding or 6)
-            local TabContentWidth = math.ceil(TabTextWidth) + (Icon and 14 or 0) + (Icon and 6 or 0) + (TabHorizontalPadding * 2)
-            local TabButtonWidth = math.max(74, TabContentWidth)
+            local TabHorizontalPadding = TabButtonsStyle.Padding or 9
 
             TabButton = New("TextButton", {
                 BackgroundColor3 = "MainColor",
                 BackgroundTransparency = 1,
-                Size = UDim2.new(0, TabButtonWidth, 1, 0),
+                Size = UDim2.new(1, 0, 0, 38),
                 Text = "",
                 LayoutOrder = Order,
                 Parent = Tabs,
@@ -13731,11 +14447,11 @@ function Library:CreateWindow(WindowInfo)
             })
             if TabButtonsStyle.Indicator then
                 TabIndicator = New("Frame", {
-                    AnchorPoint = Vector2.new(0.5, 1),
+                    AnchorPoint = Vector2.new(0, 0.5),
                     BackgroundColor3 = "AccentColor",
                     BackgroundTransparency = 1,
-                    Position = UDim2.new(0.5, 0, 1, -1),
-                    Size = UDim2.new(0, 30, 0, 2),
+                    Position = UDim2.new(0, 0, 0.5, 0),
+                    Size = UDim2.new(0, TabButtonsStyle.IndicatorWidth or 2, 0, TabButtonsStyle.IndicatorHeight or 20),
                     Parent = TabButton,
                 })
 
@@ -13759,7 +14475,7 @@ function Library:CreateWindow(WindowInfo)
             })
             New("UIListLayout", {
                 FillDirection = Enum.FillDirection.Horizontal,
-                HorizontalAlignment = Enum.HorizontalAlignment.Center,
+                HorizontalAlignment = Enum.HorizontalAlignment.Left,
                 VerticalAlignment = Enum.VerticalAlignment.Center,
                 Padding = UDim.new(0, 6),
                 SortOrder = Enum.SortOrder.LayoutOrder,
@@ -13769,8 +14485,8 @@ function Library:CreateWindow(WindowInfo)
             if Icon then
                 TabIcon = New("ImageLabel", {
                     BackgroundTransparency = 1,
-                    ImageColor3 = Icon.Custom and "WhiteColor" or "AccentColor",
-                    ImageTransparency = 0.5,
+                    ImageColor3 = "FontColor",
+                    ImageTransparency = 0.35,
                     LayoutOrder = 1,
                     ScaleType = Enum.ScaleType.Fit,
                     Size = UDim2.fromOffset(14, 14),
@@ -13786,7 +14502,7 @@ function Library:CreateWindow(WindowInfo)
                 Size = UDim2.new(0, 0, 1, 0),
                 Text = Name,
                 TextSize = 13,
-                TextTransparency = 0.5,
+                TextTransparency = 0.38,
                 TextTruncate = Enum.TextTruncate.AtEnd,
                 TextXAlignment = Enum.TextXAlignment.Left,
                 Visible = not IsCompact,
@@ -13795,6 +14511,7 @@ function Library:CreateWindow(WindowInfo)
             })
 
             table.insert(Library.TabButtons, {
+                Button = TabButton,
                 Label = TabLabel,
                 Padding = ButtonPadding,
                 Icon = TabIcon,
@@ -13832,7 +14549,9 @@ function Library:CreateWindow(WindowInfo)
             Tooltip = Tooltip,
             TooltipTable = nil,
 
+            Connections = {},
             Elements = {},
+            Destroyed = false,
 
             Window = Window,
             Button = TabButton,
@@ -13873,19 +14592,19 @@ function Library:CreateWindow(WindowInfo)
                 })
             )
 
-            Box.Focused:Connect(function()
+            table.insert(Tab.Connections, Box.Focused:Connect(function()
                 Library.Registry[BoxStroke].Color = "AccentColor"
                 TweenService:Create(BoxStroke, Library.TweenInfo, {
                     Color = Library.Scheme.AccentColor,
                 }):Play()
-            end)
+            end))
 
-            Box.FocusLost:Connect(function()
+            table.insert(Tab.Connections, Box.FocusLost:Connect(function()
                 Library.Registry[BoxStroke].Color = "OutlineColor"
                 TweenService:Create(BoxStroke, Library.TweenInfo, {
                     Color = Library.Scheme.OutlineColor,
                 }):Play()
-            end)
+            end))
 
             local Button = New("TextButton", {
                 AnchorPoint = Vector2.new(1, 0),
@@ -13909,19 +14628,19 @@ function Library:CreateWindow(WindowInfo)
                 })
             )
 
-            Button.MouseEnter:Connect(function()
+            table.insert(Tab.Connections, Button.MouseEnter:Connect(function()
                 TweenService:Create(Button, Library.TweenInfo, {
                     TextTransparency = 0,
                 }):Play()
-            end)
+            end))
 
-            Button.MouseLeave:Connect(function()
+            table.insert(Tab.Connections, Button.MouseLeave:Connect(function()
                 TweenService:Create(Button, Library.TweenInfo, {
                     TextTransparency = 0.4,
                 }):Play()
-            end)
+            end))
 
-            Button.InputBegan:Connect(function(Input)
+            table.insert(Tab.Connections, Button.InputBegan:Connect(function(Input)
                 if not IsClickInput(Input) then
                     return
                 end
@@ -13931,10 +14650,54 @@ function Library:CreateWindow(WindowInfo)
                 end
 
                 Library:SafeCallback(Callback, Box.Text)
-            end)
+            end))
+        end
+
+        function Tab:RefreshSides()
+            if TabContainer and TabContainer.Parent then
+                TabContainer.Position = UDim2.fromScale(0, 0)
+                TabContainer.Size = UDim2.fromScale(1, 1)
+            end
+        end
+
+        function Tab:Resize()
+            if not TabContainer or not TabContainer.Parent then return end
+            local Layout = TabContainer:FindFirstChildOfClass("UIListLayout")
+            if Layout then TabContainer.CanvasSize = UDim2.fromOffset(0, math.max(0, Layout.AbsoluteContentSize.Y + 8)) end
+            Tab:RefreshSides()
+        end
+
+        function Tab:UpdateCorners()
+            local Radius = math.max(0, math.min(WindowInfo.CornerRadius, 20))
+            for _, Child in TabContainer:GetChildren() do
+                if Child:IsA("GuiObject") then
+                    local Corner = Child:FindFirstChildOfClass("UICorner")
+                    if Corner then Corner.CornerRadius = UDim.new(0, Radius / 2) end
+                end
+            end
         end
 
         function Tab:Destroy()
+            if Tab.Destroyed then return end
+            local WasActive = Library.ActiveTab == Tab
+            if WasActive then
+                Library.ActiveTab = nil
+            end
+            Tab.Destroyed = true
+            for _, Connection in Tab.Connections do
+                if Connection and Connection.Connected then Connection:Disconnect() end
+            end
+            table.clear(Tab.Connections)
+            if Tab.TooltipTable then Tab.TooltipTable:Destroy(); Tab.TooltipTable = nil end
+
+            for Index = #Tab.Elements, 1, -1 do
+                local Element = Tab.Elements[Index]
+                if Element and Element.Destroy then
+                    Element:Destroy()
+                end
+            end
+            table.clear(Tab.Elements)
+
             if TabContainer then
                 TabContainer:Destroy()
             end
@@ -13951,6 +14714,15 @@ function Library:CreateWindow(WindowInfo)
             end
 
             Library.Tabs[Name] = nil
+
+            if WasActive then
+                for _, Candidate in Library.Tabs do
+                    if Candidate and not Candidate.Destroyed and Candidate.Button and Candidate.Button.Visible then
+                        Candidate:Show()
+                        break
+                    end
+                end
+            end
         end
 
         function Tab:SetOrder(NewOrder: number)
@@ -13958,20 +14730,16 @@ function Library:CreateWindow(WindowInfo)
             TabButton.LayoutOrder = Order
         end
 
-        function Tab:RefreshSides() end
-        function Tab:Resize() end
-        function Tab:UpdateCorners() end
-
         function Tab:Hover(Hovering)
             if Library.ActiveTab == Tab then
                 return
             end
 
             TweenService:Create(TabButton, Library.TweenInfo, {
-                BackgroundTransparency = Hovering and 0.84 or 1,
+                BackgroundTransparency = Hovering and 0.86 or 1,
             }):Play()
             TweenService:Create(TabStroke, Library.TweenInfo, {
-                Transparency = Hovering and 0.78 or 1,
+                Transparency = 1,
             }):Play()
             TweenService:Create(TabLabel, Library.TweenInfo, {
                 TextTransparency = Hovering and 0.12 or 0.42,
@@ -13993,10 +14761,10 @@ function Library:CreateWindow(WindowInfo)
             end
 
             TweenService:Create(TabButton, Library.TweenInfo, {
-                BackgroundTransparency = 0.72,
+                BackgroundTransparency = 0.84,
             }):Play()
             TweenService:Create(TabStroke, Library.TweenInfo, {
-                Transparency = 0.55,
+                Transparency = 1,
             }):Play()
 
             if TabIndicator then
@@ -14095,13 +14863,13 @@ function Library:CreateWindow(WindowInfo)
             Tab:Show()
         end
 
-        TabButton.MouseEnter:Connect(function()
-            Tab:Hover(true)
-        end)
-        TabButton.MouseLeave:Connect(function()
-            Tab:Hover(false)
-        end)
-        TabButton.MouseButton1Click:Connect(Tab.Show)
+        table.insert(Tab.Connections, TabButton.MouseEnter:Connect(function()
+            if not Tab.Destroyed then Tab:Hover(true) end
+        end))
+        table.insert(Tab.Connections, TabButton.MouseLeave:Connect(function()
+            if not Tab.Destroyed then Tab:Hover(false) end
+        end))
+        table.insert(Tab.Connections, TabButton.MouseButton1Click:Connect(Tab.Show))
 
         Tab.Container = TabContainer
         setmetatable(Tab, BaseGroupbox)
@@ -14684,7 +15452,7 @@ function Library:CreateWindow(WindowInfo)
             local ShowCursorBinding = Library.ShowCursorBinding
             Library.OriginalMouseIconEnabled = UserInputService.MouseIconEnabled
 
-            pcall(function() RunService:UnbindFromRenderStep(ShowCursorBinding) end)
+            RunService:UnbindFromRenderStep(ShowCursorBinding)
             RunService:BindToRenderStep(ShowCursorBinding, Enum.RenderPriority.Last.Value, function()
                 UserInputService.MouseIconEnabled = not Library.ShowCustomCursor
 
@@ -14714,7 +15482,7 @@ function Library:CreateWindow(WindowInfo)
         return Window:Toggle(Value)
     end
 
-    if false then -- Sidebar resizing is disabled for the Aurora-style top navigation.
+    if WindowInfo.EnableSidebarResize then
         local Threshold = (WindowInfo.MinSidebarWidth + WindowInfo.SidebarCompactWidth) * WindowInfo.SidebarCollapseThreshold
         local StartPos, StartWidth
         local Dragging = false
@@ -14794,15 +15562,18 @@ function Library:CreateWindow(WindowInfo)
                 if Width > Threshold then
                     Window:SetSidebarWidth(math.max(Width, WindowInfo.MinSidebarWidth))
                 else
-                    Window:SetSidebarWidth(WindowInfo.SidebarCompactWidth)
+                    Window:SetCompact(true)
                 end
             end
         end))
     end
 
     Window:SetAlwaysOnTop(WindowInfo.AlwaysOnTop)
+    Window.AlwaysOnTop = WindowInfo.AlwaysOnTop == true
+    Window.Size = MainFrame.Size
+    Window.Position = MainFrame.Position
     if WindowInfo.EnableCompacting and WindowInfo.SidebarCompacted then
-        Window:SetSidebarWidth(WindowInfo.SidebarCompactWidth)
+        Window:SetCompact(true)
     end
     if WindowInfo.AutoShow and not Library.ActiveLoading then
         task.spawn(Library.Toggle)
@@ -14899,6 +15670,20 @@ function Library:CreateLoading(LoadingInfo)
     end
 
     LoadingInfo = Library:Validate(LoadingInfo, Templates.Loading)
+
+    assert(typeof(LoadingInfo.Title) == "string", "Loading Title must be a string.")
+    assert(typeof(LoadingInfo.WindowWidth) == "number" and LoadingInfo.WindowWidth == LoadingInfo.WindowWidth and LoadingInfo.WindowWidth ~= math.huge and LoadingInfo.WindowWidth ~= -math.huge and LoadingInfo.WindowWidth > 0, "Loading WindowWidth must be a finite number greater than 0.")
+    assert(typeof(LoadingInfo.WindowHeight) == "number" and LoadingInfo.WindowHeight == LoadingInfo.WindowHeight and LoadingInfo.WindowHeight ~= math.huge and LoadingInfo.WindowHeight ~= -math.huge and LoadingInfo.WindowHeight > 0, "Loading WindowHeight must be a finite number greater than 0.")
+    assert(typeof(LoadingInfo.ContentWidth) == "number" and LoadingInfo.ContentWidth == LoadingInfo.ContentWidth and LoadingInfo.ContentWidth ~= math.huge and LoadingInfo.ContentWidth ~= -math.huge and LoadingInfo.ContentWidth > 0, "Loading ContentWidth must be a finite number greater than 0.")
+    assert(typeof(LoadingInfo.SidebarWidth) == "number" and LoadingInfo.SidebarWidth == LoadingInfo.SidebarWidth and LoadingInfo.SidebarWidth ~= math.huge and LoadingInfo.SidebarWidth ~= -math.huge and LoadingInfo.SidebarWidth > 0, "Loading SidebarWidth must be a finite number greater than 0.")
+    assert(typeof(LoadingInfo.CurrentStep) == "number" and LoadingInfo.CurrentStep == LoadingInfo.CurrentStep and LoadingInfo.CurrentStep ~= math.huge and LoadingInfo.CurrentStep ~= -math.huge, "Loading CurrentStep must be a finite number.")
+    assert(typeof(LoadingInfo.TotalSteps) == "number" and LoadingInfo.TotalSteps == LoadingInfo.TotalSteps and LoadingInfo.TotalSteps ~= math.huge and LoadingInfo.TotalSteps ~= -math.huge and LoadingInfo.TotalSteps > 0, "Loading TotalSteps must be a finite number greater than 0.")
+    assert(typeof(LoadingInfo.ShowSidebar) == "boolean", "Loading ShowSidebar must be a boolean.")
+    assert(typeof(LoadingInfo.AutoResizeHeight) == "boolean", "Loading AutoResizeHeight must be a boolean.")
+    assert(typeof(LoadingInfo.AlwaysOnTop) == "boolean", "Loading AlwaysOnTop must be a boolean.")
+    assert(typeof(LoadingInfo.LoadingIconTweenTime) == "number" and LoadingInfo.LoadingIconTweenTime == LoadingInfo.LoadingIconTweenTime and LoadingInfo.LoadingIconTweenTime ~= math.huge and LoadingInfo.LoadingIconTweenTime ~= -math.huge and LoadingInfo.LoadingIconTweenTime >= 0, "Loading LoadingIconTweenTime must be a finite number greater than or equal to 0.")
+    LoadingInfo.TotalSteps = math.max(1, math.floor(LoadingInfo.TotalSteps))
+    LoadingInfo.CurrentStep = math.clamp(LoadingInfo.CurrentStep, 0, LoadingInfo.TotalSteps)
 
     local Loading = {
         CurrentStep = LoadingInfo.CurrentStep,
@@ -15349,6 +16134,7 @@ function Library:CreateLoading(LoadingInfo)
     end
 
     function Loading:SetLoadingIconTweenTime(TweenTime)
+        assert(typeof(TweenTime) == "number" and TweenTime == TweenTime and TweenTime ~= math.huge and TweenTime ~= -math.huge and TweenTime >= 0, "TweenTime must be a finite number greater than or equal to 0.")
         if RotationTween then
             StopTween(RotationTween, true)
             RotationTween = nil
@@ -15367,46 +16153,55 @@ function Library:CreateLoading(LoadingInfo)
     end
 
     function Loading:SetLoadingIconColor(Color)
+        assert(typeof(Color) == "Color3", "Color must be a Color3.")
         LoadingIcon.ImageColor3 = Color
     end
 
     function Loading:SetCurrentStep(Step)
+        assert(typeof(Step) == "number" and Step == Step and Step ~= math.huge and Step ~= -math.huge, "Step must be a finite number.")
         Loading.CurrentStep = math.clamp(Step, 0, Loading.TotalSteps)
 
-        local Progress = Loading.CurrentStep / Loading.TotalSteps
+        local Progress = Loading.TotalSteps > 0 and (Loading.CurrentStep / Loading.TotalSteps) or 0
         TweenService:Create(SliderFill, Library.TweenInfo, { Size = UDim2.fromScale(Progress, 1) }):Play()
 
         ProgressLabel.Text = string.format("%d/%d", Loading.CurrentStep, Loading.TotalSteps)
     end
 
     function Loading:SetTotalSteps(Steps)
+        assert(typeof(Steps) == "number" and Steps == Steps and Steps ~= math.huge and Steps ~= -math.huge, "Total steps must be a finite number.")
+        Steps = math.max(1, math.floor(Steps))
         Loading.TotalSteps = Steps
         Loading:SetCurrentStep(Loading.CurrentStep)
     end
 
     --// Size \\--
     function Loading:SetWindowHeight(Height)
+        assert(typeof(Height) == "number" and Height == Height and Height ~= math.huge and Height ~= -math.huge and Height > 0, "Height must be a finite number greater than 0.")
         Loading.WindowHeight = Height
         Loading:UpdateLayout()
     end
 
     function Loading:SetWindowWidth(Width)
+        assert(typeof(Width) == "number" and Width == Width and Width ~= math.huge and Width ~= -math.huge and Width > 0, "Width must be a finite number greater than 0.")
         Loading.WindowWidth = Width
         Loading:UpdateLayout()
     end
 
     function Loading:SetContentWidth(Width)
+        assert(typeof(Width) == "number" and Width == Width and Width ~= math.huge and Width ~= -math.huge and Width > 0, "Width must be a finite number greater than 0.")
         Loading.ContentWidth = Width
         Loading:UpdateLayout()
     end
 
     function Loading:SetSidebarWidth(Width)
+        assert(typeof(Width) == "number" and Width == Width and Width ~= math.huge and Width ~= -math.huge and Width > 0, "Width must be a finite number greater than 0.")
         Loading.SidebarWidth = Width
         Loading:UpdateLayout()
     end
 
     --// Sidebar \\--
     function Loading:ShowSidebarPage(Bool)
+        assert(typeof(Bool) == "boolean", "Bool must be a boolean.")
         Loading.ShowSidebar = Bool
         Loading:UpdateLayout()
     end
@@ -15555,13 +16350,19 @@ function Library:CreateLoading(LoadingInfo)
 
     --// Destroy/Continue \\--
     function Loading:Destroy()
+        if Loading.Destroyed then
+            return
+        end
+        Loading.Destroyed = true
+
         if RotationTween then
             StopTween(RotationTween, true)
             RotationTween = nil
         end
 
-        ScreenGui:Destroy()
-        Loading.Destroyed = true
+        if ScreenGui and ScreenGui.Parent then
+            ScreenGui:Destroy()
+        end
         Library.ActiveLoading = nil
 
         if Library.Toggle and Library.Toggled == false and Library.Unloaded ~= true then
@@ -15614,6 +16415,7 @@ Library:GiveSignal(Teams.ChildAdded:Connect(OnTeamChange))
 Library:GiveSignal(Teams.ChildRemoved:Connect(OnTeamChange))
 
 function Library:Unload()
+    if Library.Unloaded then return end
     Library.Unloaded = true
 
     --// Disconnect connections
@@ -15635,13 +16437,16 @@ function Library:Unload()
     end
 
     --// Destroy elements
-    for Index = #Library.Tabs, 1, -1 do
-        local Tab = table.remove(Library.Tabs, Index)
-
+    local TabsToDestroy = {}
+    for _, Tab in Library.Tabs do
+        table.insert(TabsToDestroy, Tab)
+    end
+    for _, Tab in TabsToDestroy do
         if Tab and Tab.Destroy then
-            Library:SafeCallback(Tab.Destroy, Tab)
+            Tab:Destroy()
         end
     end
+    table.clear(Library.Tabs)
 
     for Index = #Tooltips, 1, -1 do
         local Tooltip = table.remove(Tooltips, Index)
@@ -15654,6 +16459,30 @@ function Library:Unload()
     if Library.ActiveLoading then
         Library.ActiveLoading:Destroy()
     end
+
+    local NotificationsToDestroy = {}
+    for _, Notification in Library.Notifications do
+        if Notification then
+            table.insert(NotificationsToDestroy, Notification)
+        end
+    end
+    for _, Notification in NotificationsToDestroy do
+        if Notification and not Notification.Destroyed and Notification.Destroy then
+            Notification:Destroy()
+        end
+    end
+    table.clear(Library.Notifications)
+
+    local DialoguesToDismiss = {}
+    for _, Dialog in Library.Dialogues do
+        table.insert(DialoguesToDismiss, Dialog)
+    end
+    for _, Dialog in DialoguesToDismiss do
+        if Dialog and Dialog.Dismiss then
+            Dialog:Dismiss()
+        end
+    end
+    table.clear(Library.Dialogues)
 
     if ScreenGui then
         ScreenGui:Destroy()
@@ -15677,18 +16506,29 @@ function Library:Unload()
     table.clear(Library.Corners)
     table.clear(Library.SpecificCorners)
     table.clear(Library.PillCorners)
+    table.clear(Library.CornerStyles)
     table.clear(Library.ContextMenus)
 
-    table.clear(Library.Notifications)
-    table.clear(Library.Dialogues)
     table.clear(Library.DraggableElements)
     table.clear(Library.KeybindToggles)
     table.clear(Library.DependencyBoxes)
+    Library.ActiveTab = nil
+    Library.PreviousTab = nil
+    Library.ActiveDialog = nil
+    Library.ActiveLoading = nil
+    Library.SearchText = ""
+    Library.IsPicking = false
+    Library.IsDragging = false
+    Library.IsResizing = false
+    Library.Searching = false
+    Library.LastSearchTab = nil
 
     table.clear(TransparencyCache)
     table.clear(ActiveTabTweens)
 
-    Library.Toggle = function(...) end
+    Library.Toggle = nil
+    Library.ToggleKeybind = nil
+    UserInputService.MouseIconEnabled = Library.OriginalMouseIconEnabled
     Library.ScreenGui = nil
     Library.Floats = nil
     Library.Overlay = nil
