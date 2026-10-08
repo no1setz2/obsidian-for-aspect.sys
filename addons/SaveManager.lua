@@ -430,7 +430,7 @@ function SaveManager:RefreshConfigList()
     pcall(makefolder, SettingsPath)
     local SuccessList, Files = pcall(listfiles, SettingsPath)
     if not (SuccessList and typeof(Files) == "table") then
-        SaveManager.Library:Notify(string.format("Failed to load config list: %s", tostring(Files)))
+        SaveManager.Library:Notify(Title = "Config", Description = string.format("Failed to load config list: %s", tostring(Files)))
         return {}
     end
 
@@ -738,7 +738,7 @@ function SaveManager:LoadAutoloadConfig()
     local ConfigName, Success, FetchErrorMessage = SaveManager:GetAutoloadConfig()
     if not Success or FetchErrorMessage then
         if FetchErrorMessage ~= "Autoload config is not set" then
-            SaveManager.Library:Notify(string.format("Failed to load autoload config: %s", FetchErrorMessage))
+            SaveManager.Library:Notify(Title = "Config", Description = string.format("Failed to load autoload config: %s", FetchErrorMessage))
         end
 
         return
@@ -746,11 +746,11 @@ function SaveManager:LoadAutoloadConfig()
 
     local SuccessLoad, LoadErrorMessage = SaveManager:Load(ConfigName)
     if not SuccessLoad then
-        SaveManager.Library:Notify(string.format("Failed to load autoload config: %s", LoadErrorMessage))
+        SaveManager.Library:Notify(Title = "Config", Description = string.format("Failed to load autoload config: %s", LoadErrorMessage))
         return
     end
 
-    SaveManager.Library:Notify(string.format("Successfully loaded autoload config %q", ConfigName))
+    SaveManager.Library:Notify(Title = "Config", Description = string.format("Successfully loaded autoload config %q", ConfigName))
 end
 
 function SaveManager:DeleteAutoLoadConfig(): (boolean, string?)
@@ -846,12 +846,12 @@ function SaveManager:BuildConfigSection(Tab: any, IconName: string)
     ConfigurationBox:AddButton("Create config", function()
         local ConfigName = ConfigNameInput.Value
         if IsStringEmpty(ConfigName) then
-            SaveManager.Library:Notify("Configuration name cannot be empty.")
+            SaveManager.Library:Notify(Title = "Config", Description = "Configuration name cannot be empty.")
             return
         end
 
         if string.lower(ConfigName) == "autoload" then
-            SaveManager.Library:Notify("Invalid config name provided.")
+            SaveManager.Library:Notify(Title = "Config", Description = "Invalid config name provided.")
             return
         end
         
@@ -868,11 +868,11 @@ function SaveManager:BuildConfigSection(Tab: any, IconName: string)
             function()
                 local Success, ErrorMessage = SaveManager:Save(ConfigName)
                 if not Success then
-                    SaveManager.Library:Notify(string.format("Failed to create config %q: %s", ConfigName, ErrorMessage))
+                    SaveManager.Library:Notify(Title = "Config", Description = string.format("Failed to create config %q: %s", ConfigName, ErrorMessage))
                     return
                 end
 
-                SaveManager.Library:Notify(string.format("Successfully created config %q", ConfigName))
+                SaveManager.Library:Notify(Title = "Config", Description = string.format("Successfully created config %q", ConfigName))
                 RefreshList()
             end
         )
@@ -911,7 +911,7 @@ function SaveManager:BuildConfigSection(Tab: any, IconName: string)
         Func = function()
             local ConfigName = ConfigList.Value
             if IsStringEmpty(ConfigName) then
-                SaveManager.Library:Notify("Please select a config first.")
+                SaveManager.Library:Notify(Title = "Config", Description = "Please select a config first.")
                 return
             end
 
@@ -928,11 +928,11 @@ function SaveManager:BuildConfigSection(Tab: any, IconName: string)
                 function()
                     local Success, ErrorMessage = SaveManager:Load(ConfigName)
                     if not Success then
-                        SaveManager.Library:Notify(string.format("Failed to load config %q: %s", ConfigName, ErrorMessage))
+                        SaveManager.Library:Notify(Title = "Config", Description = string.format("Failed to load config %q: %s", ConfigName, ErrorMessage))
                         return
                     end
 
-                    SaveManager.Library:Notify(string.format("Successfully loaded config %q", ConfigName))
+                    SaveManager.Library:Notify(Title = "Config", Description = string.format("Successfully loaded config %q", ConfigName))
                 end
             )
         end
@@ -945,7 +945,7 @@ function SaveManager:BuildConfigSection(Tab: any, IconName: string)
         Func = function()
             local ConfigName = ConfigList.Value
             if IsStringEmpty(ConfigName) then
-                SaveManager.Library:Notify("Please select a config first.")
+                SaveManager.Library:Notify(Title = "Config", Description = "Please select a config first.")
                 return
             end
 
@@ -962,11 +962,11 @@ function SaveManager:BuildConfigSection(Tab: any, IconName: string)
                 function()
                     local Success, ErrorMessage = SaveManager:Save(ConfigName)
                     if not Success then
-                        SaveManager.Library:Notify(string.format("Failed to overwrite config %q: %s", ConfigName, ErrorMessage))
+                        SaveManager.Library:Notify(Title = "Config", Description = string.format("Failed to overwrite config %q: %s", ConfigName, ErrorMessage))
                         return
                     end
 
-                    SaveManager.Library:Notify(string.format("Successfully overwrote config %q", ConfigName))
+                    SaveManager.Library:Notify(Title = "Config", Description = string.format("Successfully overwrote config %q", ConfigName))
                 end
             )
         end
@@ -979,7 +979,7 @@ function SaveManager:BuildConfigSection(Tab: any, IconName: string)
         Func = function()
             local ConfigName = ConfigList.Value
             if IsStringEmpty(ConfigName) then
-                SaveManager.Library:Notify("Please select a config first.")
+                SaveManager.Library:Notify(Title = "Config", Description = "Please select a config first.")
                 return
             end
 
@@ -996,11 +996,11 @@ function SaveManager:BuildConfigSection(Tab: any, IconName: string)
                 function()
                     local Success, ErrorMessage = SaveManager:Delete(ConfigName)
                     if not Success then
-                        SaveManager.Library:Notify(string.format("Failed to delete config %q: %s", ConfigName, ErrorMessage))
+                        SaveManager.Library:Notify(Title = "Config", Description = string.format("Failed to delete config %q: %s", ConfigName, ErrorMessage))
                         return
                     end
 
-                    SaveManager.Library:Notify(string.format("Successfully deleted config %q", ConfigName))
+                    SaveManager.Library:Notify(Title = "Config", Description = string.format("Successfully deleted config %q", ConfigName))
                     RefreshAutoloadConfigLabel()
                 end
             )
@@ -1017,17 +1017,17 @@ function SaveManager:BuildConfigSection(Tab: any, IconName: string)
         Func = function()
             local ConfigName = ConfigList.Value
             if IsStringEmpty(ConfigName) then
-                SaveManager.Library:Notify("Please select a config first.")
+                SaveManager.Library:Notify(Title = "Config", Description = "Please select a config first.")
                 return
             end
 
             local Success, ErrorMessage = SaveManager:SaveAutoloadConfig(ConfigName)
             if not Success then
-                SaveManager.Library:Notify(string.format("Failed to set autoload config %q: %s", ConfigName, ErrorMessage))
+                SaveManager.Library:Notify(Title = "Config", Description = string.format("Failed to set autoload config %q: %s", ConfigName, ErrorMessage))
                 return
             end
 
-            SaveManager.Library:Notify(string.format("Successfully set autoload config to %q", ConfigName))
+            SaveManager.Library:Notify(Title = "Config", Description = string.format("Successfully set autoload config to %q", ConfigName))
             RefreshAutoloadConfigLabel()
         end
     })
@@ -1050,11 +1050,11 @@ function SaveManager:BuildConfigSection(Tab: any, IconName: string)
                 function()
                     local Success, ErrorMessage = SaveManager:DeleteAutoLoadConfig()
                     if not Success then
-                        SaveManager.Library:Notify(string.format("Failed to reset autoload config: %s", ErrorMessage))
+                        SaveManager.Library:Notify(Title = "Config", Description = string.format("Failed to reset autoload config: %s", ErrorMessage))
                         return
                     end
 
-                    SaveManager.Library:Notify("Successfully reset autoload config.")
+                    SaveManager.Library:Notify(Title = "Config", Description = "Successfully reset autoload config.")
                     RefreshAutoloadConfigLabel()
                 end
             )
@@ -1073,7 +1073,7 @@ function SaveManager:BuildConfigSection(Tab: any, IconName: string)
     ConfigurationBox:AddButton("Import config", function()
         local ConfigJSON = ConfigJSONInput.Value
         if IsStringEmpty(ConfigJSON) then
-            SaveManager.Library:Notify("Configuration JSON cannot be empty")
+            SaveManager.Library:Notify(Title = "Config", Description = "Configuration JSON cannot be empty")
             return
         end
 
@@ -1090,11 +1090,11 @@ function SaveManager:BuildConfigSection(Tab: any, IconName: string)
             function()
                 local Success, ErrorMessage = SaveManager:LoadJSON(ConfigJSON)
                 if not Success then
-                    SaveManager.Library:Notify(string.format("Failed to import config: %s", ErrorMessage))
+                    SaveManager.Library:Notify(Title = "Config", Description = string.format("Failed to import config: %s", ErrorMessage))
                     return
                 end
 
-                SaveManager.Library:Notify("Successfully imported config")
+                SaveManager.Library:Notify(Title = "Config", Description = "Successfully imported config")
             end
         )
     end)
@@ -1102,14 +1102,14 @@ function SaveManager:BuildConfigSection(Tab: any, IconName: string)
     ConfigurationBox:AddButton("Export current config", function()
         local EncodedData, Success, ErrorMessage = SaveManager:SaveJSON()
         if not Success  then
-            SaveManager.Library:Notify(ErrorMessage)
+            SaveManager.Library:Notify(Title = "Config", Description = ErrorMessage)
             return
         end
 
         ConfigJSONInput:SetValue(EncodedData)
         if setclipboard then
             setclipboard(EncodedData)
-            SaveManager.Library:Notify("Copied config to your clipboard")
+            SaveManager.Library:Notify(Title = "Config", Description = "Copied config to your clipboard")
         end
     end)
 
